@@ -137,20 +137,11 @@ static void
 update_icon (NautilusNameCell *self)
 {
     g_autoptr (NautilusViewItem) item = nautilus_view_cell_get_item (NAUTILUS_VIEW_CELL (self));
-    gboolean is_cut;
 
     g_return_if_fail (item != NULL);
 
-    g_object_get (item, "is-cut", &is_cut, NULL);
-
-    if (is_cut)
-    {
-        gtk_widget_set_visible (self->icon, FALSE);
-        gtk_widget_remove_css_class (self->icon, "hidden-file");
-
-        return;
-    }
-
+    /* The cut affordance is drawn as an overlay in snapshot(); the thumbnail
+     * stays visible underneath, so the icon is set unconditionally here. */
     guint icon_size;
     g_autoptr (GdkPaintable) icon_paintable = NULL;
     NautilusFile *file = nautilus_view_item_get_file (item);
@@ -397,58 +388,69 @@ snapshot (GtkWidget   *widget,
 {
     NautilusNameCell *self = NAUTILUS_NAME_CELL (widget);
     g_autoptr (NautilusViewItem) item = nautilus_view_cell_get_item (NAUTILUS_VIEW_CELL (self));
-    gboolean is_cut;
+    gboolean is_cut = FALSE;
+    graphene_rect_t dash_bounds;
 
-    g_object_get (item, "is-cut", &is_cut, NULL);
-
-    if (is_cut)
+    if (item != NULL)
     {
-        graphene_rect_t dash_bounds;
-
-        if (gtk_widget_compute_bounds (self->fixed_height_box, widget, &dash_bounds))
-        {
-            AdwStyleManager *style_manager = adw_style_manager_get_default ();
-            gboolean is_high_contrast = adw_style_manager_get_high_contrast (style_manager);
-            guint icon_size;
-            GdkRGBA color, dashed_border_color, icon_color;
-            gboolean use_small_icon;
-            gchar *icon_name;
-            const double border_opacity = is_high_contrast ? 0.5 : 0.15;
-            const double dim_opacity = is_high_contrast ? 0.9 : 0.55;
-            graphene_rect_t icon_bounds = dash_bounds;
-
-            g_object_get (self, "icon-size", &icon_size, NULL);
-            gtk_widget_get_color (widget, &color);
-            use_small_icon = icon_size <= NAUTILUS_LIST_ICON_SIZE_MEDIUM;
-            icon_name = use_small_icon ? "cut-symbolic" : "cut-large-symbolic";
-
-            if (icon_size >= NAUTILUS_THUMBNAIL_MINIMUM_ICON_SIZE)
-            {
-                dashed_border_color = color;
-                dashed_border_color.alpha *= border_opacity;
-                nautilus_ui_draw_icon_dashed_border (snapshot, &dash_bounds, dashed_border_color);
-
-                graphene_rect_inset_r (&dash_bounds,
-                                       0.2 * dash_bounds.size.width,
-                                       0.2 * dash_bounds.size.height,
-                                       &icon_bounds);
-            }
-
-            icon_color = color;
-            icon_color.alpha *= dim_opacity;
-            nautilus_ui_draw_symbolic_icon (snapshot,
-                                            icon_name,
-                                            &icon_bounds,
-                                            icon_color,
-                                            gtk_widget_get_scale_factor (widget));
-        }
-        else
-        {
-            g_warning ("Could not compute icon bounds in cell coordinates.");
-        }
+        g_object_get (item, "is-cut", &is_cut, NULL);
     }
 
+    if (!is_cut)
+    {
+        GTK_WIDGET_CLASS (nautilus_name_cell_parent_class)->snapshot (widget, snapshot);
+        return;
+    }
+
+    AdwStyleManager *style_manager = adw_style_manager_get_default ();
+    gboolean is_high_contrast = adw_style_manager_get_high_contrast (style_manager);
+    const double content_opacity = is_high_contrast ? 0.7 : 0.55;
+
+    /* Draw the cell content (thumbnail included) dimmed, then overlay the cut
+     * affordance on top, instead of hiding the thumbnail behind it. */
+    gtk_snapshot_push_opacity (snapshot, content_opacity);
     GTK_WIDGET_CLASS (nautilus_name_cell_parent_class)->snapshot (widget, snapshot);
+    gtk_snapshot_pop (snapshot);
+
+    if (gtk_widget_compute_bounds (self->fixed_height_box, widget, &dash_bounds))
+    {
+        guint icon_size;
+        GdkRGBA color, dashed_border_color, icon_color;
+        gboolean use_small_icon;
+        const gchar *icon_name;
+        const double border_opacity = is_high_contrast ? 0.5 : 0.15;
+        const double dim_opacity = is_high_contrast ? 0.9 : 0.55;
+        graphene_rect_t icon_bounds = dash_bounds;
+
+        g_object_get (self, "icon-size", &icon_size, NULL);
+        gtk_widget_get_color (widget, &color);
+        use_small_icon = icon_size <= NAUTILUS_LIST_ICON_SIZE_MEDIUM;
+        icon_name = use_small_icon ? "cut-symbolic" : "cut-large-symbolic";
+
+        if (icon_size >= NAUTILUS_THUMBNAIL_MINIMUM_ICON_SIZE)
+        {
+            dashed_border_color = color;
+            dashed_border_color.alpha *= border_opacity;
+            nautilus_ui_draw_icon_dashed_border (snapshot, &dash_bounds, dashed_border_color);
+
+            graphene_rect_inset_r (&dash_bounds,
+                                   0.2 * dash_bounds.size.width,
+                                   0.2 * dash_bounds.size.height,
+                                   &icon_bounds);
+        }
+
+        icon_color = color;
+        icon_color.alpha *= dim_opacity;
+        nautilus_ui_draw_symbolic_icon (snapshot,
+                                        icon_name,
+                                        &icon_bounds,
+                                        icon_color,
+                                        gtk_widget_get_scale_factor (widget));
+    }
+    else
+    {
+        g_warning ("Could not compute icon bounds in cell coordinates.");
+    }
 }
 
 static void
