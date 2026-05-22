@@ -641,10 +641,18 @@ action_toggle_sidebar (GSimpleAction *action,
                        gpointer       user_data)
 {
     NautilusWindow *window = NAUTILUS_WINDOW (user_data);
+    AdwOverlaySplitView *split_view = ADW_OVERLAY_SPLIT_VIEW (window->split_view);
     gboolean revealed;
 
-    revealed = adw_overlay_split_view_get_show_sidebar (ADW_OVERLAY_SPLIT_VIEW (window->split_view));
-    adw_overlay_split_view_set_show_sidebar (ADW_OVERLAY_SPLIT_VIEW (window->split_view), !revealed);
+    revealed = adw_overlay_split_view_get_show_sidebar (split_view);
+    adw_overlay_split_view_set_show_sidebar (split_view, !revealed);
+
+    /* Persist visibility for the desktop (wide) layout. In the collapsed
+     * layout the sidebar is a transient overlay, so its state isn't saved. */
+    if (!adw_overlay_split_view_get_collapsed (split_view))
+    {
+        g_settings_set_boolean (nautilus_window_state, "sidebar-visible", !revealed);
+    }
 }
 
 static void
@@ -1104,7 +1112,6 @@ static void
 nautilus_window_initialize_actions (NautilusWindow *window)
 {
     GApplication *app;
-    GAction *action;
     gchar detailed_action[80];
     gchar accel[80];
     gint i;
@@ -1140,9 +1147,12 @@ nautilus_window_initialize_actions (NautilusWindow *window)
 
 #undef ACCELS
 
-    action = g_action_map_lookup_action (G_ACTION_MAP (window), "toggle-sidebar");
-    g_object_bind_property (window->split_view, "collapsed",
-                            action, "enabled", G_BINDING_SYNC_CREATE);
+    /* The toggle-sidebar action stays always enabled so the sidebar can be
+     * hidden in the desktop layout too, not only in the collapsed one.
+     * Restore the visibility persisted from a previous session. */
+    adw_overlay_split_view_set_show_sidebar (
+        ADW_OVERLAY_SPLIT_VIEW (window->split_view),
+        g_settings_get_boolean (nautilus_window_state, "sidebar-visible"));
 }
 
 static gboolean

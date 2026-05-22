@@ -162,6 +162,7 @@ template $NautilusWindow: Adw.ApplicationWindow {
           $NautilusToolbar toolbar {
             show-view-controls: true;
             show-history-controls: true;
+            show-sidebar-button: true;
             sidebar-button-active: bind split_view.show-sidebar bidirectional;
             window-slot: bind template.active-slot;
           }
