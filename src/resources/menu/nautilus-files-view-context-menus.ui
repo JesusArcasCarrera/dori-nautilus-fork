@@ -56,6 +56,7 @@
       </item>
     </section>
     <section id="background-extensions-section"/>
+    <section id="background-custom-actions-section"/>
     <section>
       <item>
         <attribute name="label" translatable="yes">P_roperties</attribute>
@@ -276,6 +277,7 @@
       </item>
     </section>
     <section id="selection-extensions-section"/>
+    <section id="selection-custom-actions-section"/>
     <section>
       <item>
         <attribute name="label" translatable="yes">P_roperties</attribute>

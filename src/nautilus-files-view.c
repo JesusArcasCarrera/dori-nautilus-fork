@@ -75,6 +75,8 @@
 #include "nautilus-toolbar-menu-sections.h"
 #include "nautilus-trash-monitor.h"
 #include "nautilus-ui-utilities.h"
+
+#include "nemo-action-manager.h"
 #include "nautilus-view-info.h"
 #include "nautilus-view-item.h"
 #include "nautilus-view-model.h"
@@ -245,6 +247,9 @@ struct _NautilusFilesView
 
     /* Non exported menu, only for caching */
     GMenuModel *scripts_menu;
+
+    /* User-defined custom context-menu actions. */
+    NemoActionManager *action_manager;
 
     GCancellable *clipboard_cancellable;
 
@@ -3337,6 +3342,7 @@ nautilus_files_view_finalize (GObject *object)
     g_clear_object (&self->extensions_background_menu);
     g_clear_object (&self->templates_menu);
     g_clear_object (&self->scripts_menu);
+    g_clear_object (&self->action_manager);
     /* We don't own the slot, so no unref */
     self->slot = NULL;
 
@@ -6807,8 +6813,116 @@ action_remove_recent_server (GSimpleAction *action,
     }
 }
 
+static GFile *
+get_current_location (NautilusFilesView *self)
+{
+    g_autofree char *uri = NULL;
+
+    if (self->directory == NULL)
+    {
+        return NULL;
+    }
+
+    uri = nautilus_directory_get_uri (self->directory);
+
+    return (uri != NULL) ? g_file_new_for_uri (uri) : NULL;
+}
+
+static void
+action_run_custom_action (GSimpleAction *action,
+                          GVariant      *parameter,
+                          gpointer       user_data)
+{
+    NautilusFilesView *self = NAUTILUS_FILES_VIEW (user_data);
+    const char *id = g_variant_get_string (parameter, NULL);
+    NemoAction *nemo_action;
+    g_autolist (NautilusFile) selection = NULL;
+    g_autoptr (GFile) location = NULL;
+
+    nemo_action = nemo_action_manager_get_action (self->action_manager, id);
+    if (nemo_action == NULL)
+    {
+        return;
+    }
+
+    selection = nautilus_files_view_get_selection (self);
+    location = get_current_location (self);
+
+    nemo_action_activate (nemo_action, selection, location, GTK_WIDGET (self));
+}
+
+/* Append the visible custom actions to a context-menu section: ungrouped
+ * actions go straight in, grouped ones each into a named submenu. */
+static void
+build_custom_actions_menu (NautilusFilesView *self,
+                           GMenu             *section,
+                           GList             *selection)
+{
+    GList *actions = nemo_action_manager_get_actions (self->action_manager);
+    g_autoptr (GMenu) ungrouped = g_menu_new ();
+    g_autoptr (GHashTable) groups = g_hash_table_new_full (g_str_hash, g_str_equal,
+                                                           g_free, g_object_unref);
+    g_autoptr (GPtrArray) group_order = g_ptr_array_new_with_free_func (g_free);
+
+    for (GList *l = actions; l != NULL; l = l->next)
+    {
+        NemoAction *nemo_action = l->data;
+        const char *group_name;
+        const char *icon_name;
+        GMenu *target;
+        g_autoptr (GMenuItem) item = NULL;
+
+        if (!nemo_action_is_visible (nemo_action, selection))
+        {
+            continue;
+        }
+
+        group_name = nemo_action_get_group (nemo_action);
+        if (group_name != NULL && *group_name != '\0')
+        {
+            target = g_hash_table_lookup (groups, group_name);
+            if (target == NULL)
+            {
+                target = g_menu_new ();
+                g_hash_table_insert (groups, g_strdup (group_name), target);
+                g_ptr_array_add (group_order, g_strdup (group_name));
+            }
+        }
+        else
+        {
+            target = ungrouped;
+        }
+
+        item = g_menu_item_new (nemo_action_get_name (nemo_action), NULL);
+        g_menu_item_set_action_and_target_value (item, "view.run-custom-action",
+                                                 g_variant_new_string (nemo_action_get_id (nemo_action)));
+
+        icon_name = nemo_action_get_icon_name (nemo_action);
+        if (icon_name != NULL)
+        {
+            g_autoptr (GIcon) icon = g_themed_icon_new (icon_name);
+            g_menu_item_set_icon (item, icon);
+        }
+
+        g_menu_append_item (target, item);
+    }
+
+    if (g_menu_model_get_n_items (G_MENU_MODEL (ungrouped)) > 0)
+    {
+        g_menu_append_section (section, NULL, G_MENU_MODEL (ungrouped));
+    }
+    for (guint i = 0; i < group_order->len; i++)
+    {
+        const char *name = g_ptr_array_index (group_order, i);
+        GMenu *group_menu = g_hash_table_lookup (groups, name);
+
+        g_menu_append_submenu (section, name, G_MENU_MODEL (group_menu));
+    }
+}
+
 const GActionEntry view_entries[] =
 {
+    { .name = "run-custom-action", .parameter_type = "s", .activate = action_run_custom_action },
     /* Toolbar menu */
     { .name = "zoom-in", .activate = action_zoom_in },
     { .name = "zoom-out", .activate = action_zoom_out },
@@ -8031,6 +8145,13 @@ update_selection_menu (NautilusFilesView *self,
         nautilus_gmenu_set_from_model (G_MENU (object), self->scripts_menu);
     }
 
+    {
+        g_autolist (NautilusFile) custom_selection = nautilus_files_view_get_selection (self);
+
+        object = gtk_builder_get_object (builder, "selection-custom-actions-section");
+        build_custom_actions_menu (self, G_MENU (object), custom_selection);
+    }
+
     object = gtk_builder_get_object (builder, "open-with-application-section");
     i = nautilus_g_menu_model_find_by_string (G_MENU_MODEL (object),
                                               "nautilus-menu-item",
@@ -8090,6 +8211,9 @@ update_background_menu (NautilusFilesView *self,
     nautilus_g_menu_replace_string_in_item (self->background_menu_model, i,
                                             "hidden-when",
                                             remove_submenu ? "action-missing" : NULL);
+
+    object = gtk_builder_get_object (builder, "background-custom-actions-section");
+    build_custom_actions_menu (self, G_MENU (object), NULL);
 
     const char *view_name = NAUTILUS_IS_NETWORK_VIEW (self->list_base) ? "network" : "normal";
 
@@ -9546,6 +9670,11 @@ nautilus_files_view_init (NautilusFilesView *self)
                                     G_ACTION_GROUP (self->view_action_group));
     g_signal_connect_object (self->view_action_group, "action-state-changed::sort",
                              G_CALLBACK (on_sort_action_state_changed), self, 0);
+
+    self->action_manager = nemo_action_manager_dup_singleton ();
+    g_signal_connect_object (self->action_manager, "changed",
+                             G_CALLBACK (schedule_update_context_menus), self,
+                             G_CONNECT_SWAPPED);
 
     /* NOTE: Please do not add any key here that could interfere with
      * the rest of the app's use of those keys. Some example of keys set here

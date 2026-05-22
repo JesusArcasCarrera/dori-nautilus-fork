@@ -10,6 +10,8 @@ libnautilus_sources = [
       'nautilus-search-popover.h',
     ]
   ),
+  'nemo-action.c',
+  'nemo-action-manager.c',
   resources,
   gnome.gdbus_codegen(
     'nautilus-freedesktop-generated',
