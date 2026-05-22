@@ -1,4 +1,4 @@
-project('nautilus', 'c',
+project('nemo', 'c',
   default_options: [
     'c_std=c11',
     'warning_level=2',
@@ -151,7 +151,7 @@ if get_option('profile') == 'Devel'
   name_suffix = ' (Development Snapshot)'
 endif
 
-application_id = 'org.gnome.Nautilus' + app_id_suffix
+application_id = 'org.nemo.Files' + app_id_suffix
 
 if profile == ''
   # Example: 40.0

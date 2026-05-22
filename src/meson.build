@@ -313,7 +313,7 @@ libnautilus_dep = declare_dependency(
 )
 
 nautilus = executable(
-  'nautilus',
+  'nemo',
   'nautilus-main.c',
   dependencies: libnautilus_dep,
   install: true
