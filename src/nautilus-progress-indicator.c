@@ -38,12 +38,15 @@ struct _NautilusProgressIndicator
     guint operations_button_attention_timeout_id;
 
     GtkWidget *operations_button;
+    GtkWidget *operations_popover;
+    GtkWidget *operations_list;
     GtkWidget *operations_window;
     GtkWidget *operations_window_list;
     GListStore *progress_infos_model;
     GtkWidget *sidebar_list;
 
     gboolean reveal;
+    gboolean is_viewer;
 
     NautilusProgressInfoManager *progress_manager;
 };
@@ -186,6 +189,42 @@ add_operations_button_attention_style (NautilusProgressIndicator *self)
                                                                   self);
 }
 
+static gboolean
+operations_are_being_viewed (NautilusProgressIndicator *self)
+{
+    return gtk_widget_get_visible (self->operations_popover) ||
+           (self->operations_window != NULL &&
+            gtk_widget_get_visible (self->operations_window));
+}
+
+/* Count this indicator as a progress viewer while either the popover or the
+ * operations window is visible, so finished operations are not removed from
+ * under the user. The is_viewer guard keeps add/remove calls balanced even
+ * though two surfaces (popover and window) can drive this. */
+static void
+update_viewer_state (NautilusProgressIndicator *self)
+{
+    gboolean wants_viewer = operations_are_being_viewed (self);
+
+    if (wants_viewer == self->is_viewer)
+    {
+        return;
+    }
+    self->is_viewer = wants_viewer;
+
+    if (wants_viewer)
+    {
+        unschedule_remove_finished_operations (self);
+        nautilus_progress_manager_add_viewer (self->progress_manager,
+                                              G_OBJECT (self));
+    }
+    else
+    {
+        nautilus_progress_manager_remove_viewer (self->progress_manager,
+                                                 G_OBJECT (self));
+    }
+}
+
 static void
 on_progress_info_cancelled (NautilusProgressIndicator *self)
 {
@@ -214,8 +253,7 @@ on_progress_info_finished (NautilusProgressIndicator *self,
     /* If destination is null, don't show a notification. This happens when the
      * operation is a trash operation, which we already show a different kind of
      * notification */
-    if ((self->operations_window == NULL ||
-         !gtk_widget_is_visible (self->operations_window)) &&
+    if (!operations_are_being_viewed (self) &&
         folder_to_open != NULL)
     {
         gboolean was_quick = nautilus_progress_info_get_total_elapsed_time (info) <= OPERATION_MINIMUM_TIME;
@@ -275,6 +313,12 @@ update_operations (NautilusProgressIndicator *self)
     {
         add_operations_button_attention_style (self);
         nautilus_progress_indicator_set_reveal (self, TRUE);
+    }
+
+    /* The info widgets were recreated; restore focus to the open popover. */
+    if (gtk_widget_get_visible (self->operations_popover))
+    {
+        gtk_widget_grab_focus (self->operations_popover);
     }
 }
 
@@ -355,19 +399,15 @@ on_new_progress_info (NautilusProgressInfoManager *manager,
 static void
 on_operations_window_visible_changed (NautilusProgressIndicator *self)
 {
-    /* While the operations window is open, count as a viewer so finished
-     * operations are not auto-removed from under the user. */
-    if (gtk_widget_get_visible (self->operations_window))
-    {
-        unschedule_remove_finished_operations (self);
-        nautilus_progress_manager_add_viewer (self->progress_manager,
-                                              G_OBJECT (self));
-    }
-    else
-    {
-        nautilus_progress_manager_remove_viewer (self->progress_manager,
-                                                 G_OBJECT (self));
-    }
+    update_viewer_state (self);
+}
+
+static void
+on_operations_popover_notify_visible (NautilusProgressIndicator *self,
+                                      GParamSpec                *pspec,
+                                      GObject                   *popover)
+{
+    update_viewer_state (self);
 }
 
 static gboolean
@@ -473,13 +513,28 @@ ensure_operations_window (NautilusProgressIndicator *self)
                               self);
 }
 
+/* Open the expanded operations window, dismissing the compact popover. */
 static void
-on_operations_button_clicked (NautilusProgressIndicator *self,
-                              GtkButton                 *button)
+present_operations_window (NautilusProgressIndicator *self)
 {
+    gtk_popover_popdown (GTK_POPOVER (self->operations_popover));
     ensure_operations_window (self);
-
     gtk_window_present (GTK_WINDOW (self->operations_window));
+}
+
+static void
+on_open_in_window_clicked (NautilusProgressIndicator *self,
+                           GtkButton                 *button)
+{
+    present_operations_window (self);
+}
+
+static void
+on_operations_row_activated (NautilusProgressIndicator *self,
+                             GtkListBox                *box,
+                             GtkListBoxRow             *row)
+{
+    present_operations_window (self);
 }
 
 static void
@@ -519,6 +574,10 @@ nautilus_progress_indicator_constructed (GObject *object)
                              G_CONNECT_DEFAULT);
 
     self->progress_infos_model = g_list_store_new (NAUTILUS_TYPE_PROGRESS_INFO);
+    gtk_list_box_bind_model (GTK_LIST_BOX (self->operations_list),
+                             G_LIST_MODEL (self->progress_infos_model),
+                             (GtkListBoxCreateWidgetFunc) operations_list_create_widget,
+                             NULL, NULL);
 
     update_operations (self);
 
@@ -527,6 +586,11 @@ nautilus_progress_indicator_constructed (GObject *object)
     g_autoptr (GtkNoSelection) selection_model = gtk_no_selection_new (G_LIST_MODEL (slice));
 
     gtk_list_view_set_model (GTK_LIST_VIEW (self->sidebar_list), GTK_SELECTION_MODEL (selection_model));
+
+    g_signal_connect (self->operations_popover, "show",
+                      (GCallback) gtk_widget_grab_focus, NULL);
+    g_signal_connect_swapped (self->operations_popover, "closed",
+                              (GCallback) gtk_widget_grab_focus, self);
 }
 
 static void
@@ -576,10 +640,14 @@ nautilus_progress_indicator_class_init (NautilusProgressIndicatorClass *klass)
     gtk_widget_class_set_template_from_resource (widget_class,
                                                  "/org/gnome/nautilus/ui/nautilus-progress-indicator.ui");
     gtk_widget_class_bind_template_child (widget_class, NautilusProgressIndicator, operations_button);
+    gtk_widget_class_bind_template_child (widget_class, NautilusProgressIndicator, operations_popover);
+    gtk_widget_class_bind_template_child (widget_class, NautilusProgressIndicator, operations_list);
     gtk_widget_class_bind_template_child (widget_class, NautilusProgressIndicator, sidebar_list);
 
     gtk_widget_class_bind_template_callback (widget_class, get_paintable);
-    gtk_widget_class_bind_template_callback (widget_class, on_operations_button_clicked);
+    gtk_widget_class_bind_template_callback (widget_class, on_operations_popover_notify_visible);
+    gtk_widget_class_bind_template_callback (widget_class, on_open_in_window_clicked);
+    gtk_widget_class_bind_template_callback (widget_class, on_operations_row_activated);
 
     properties[PROP_REVEAL] = g_param_spec_boolean ("reveal", NULL, NULL, FALSE,
                                                     G_PARAM_READABLE | G_PARAM_STATIC_STRINGS);
