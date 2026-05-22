@@ -71,6 +71,13 @@ struct _NautilusProgressInfo
     gboolean finished;
     gboolean paused;
 
+    /* User-requested pause. Guarded by its own mutex (not the global
+     * progress_info lock) so a worker thread can block on pause_cond
+     * without stalling every other progress info. */
+    gboolean user_paused;
+    GMutex pause_mutex;
+    GCond pause_cond;
+
     GSource *idle_source;
     gboolean source_is_now;
 
@@ -106,6 +113,8 @@ nautilus_progress_info_finalize (GObject *object)
     g_cancellable_disconnect (info->cancellable, info->cancellable_id);
     g_object_unref (info->cancellable);
     g_clear_object (&info->destination);
+    g_mutex_clear (&info->pause_mutex);
+    g_cond_clear (&info->pause_cond);
 
     if (G_OBJECT_CLASS (nautilus_progress_info_parent_class)->finalize)
     {
@@ -387,6 +396,11 @@ on_canceled (GCancellable         *cancellable,
     g_timer_stop (info->progress_timer);
     queue_idle (info, TRUE);
     G_UNLOCK (progress_info);
+
+    /* Unblock a worker thread that may be waiting on a user pause. */
+    g_mutex_lock (&info->pause_mutex);
+    g_cond_broadcast (&info->pause_cond);
+    g_mutex_unlock (&info->pause_mutex);
 }
 
 static void
@@ -399,6 +413,9 @@ nautilus_progress_info_init (NautilusProgressInfo *info)
                                                   G_CALLBACK (on_canceled),
                                                   info,
                                                   NULL);
+
+    g_mutex_init (&info->pause_mutex);
+    g_cond_init (&info->pause_cond);
 
     manager = nautilus_progress_info_manager_dup_singleton ();
     nautilus_progress_info_manager_add_new_info (manager, info);
@@ -613,6 +630,70 @@ nautilus_progress_info_resume (NautilusProgressInfo *info)
     }
 
     G_UNLOCK (progress_info);
+}
+
+gboolean
+nautilus_progress_info_get_is_user_paused (NautilusProgressInfo *info)
+{
+    gboolean res;
+
+    g_mutex_lock (&info->pause_mutex);
+    res = info->user_paused;
+    g_mutex_unlock (&info->pause_mutex);
+
+    return res;
+}
+
+/* Request (or release) a user-initiated pause. Safe to call from the main
+ * thread; the worker thread doing the actual file operation observes it
+ * through nautilus_progress_info_wait_if_paused(). */
+void
+nautilus_progress_info_set_user_paused (NautilusProgressInfo *info,
+                                        gboolean              paused)
+{
+    gboolean changed = FALSE;
+
+    g_mutex_lock (&info->pause_mutex);
+    if (info->user_paused != paused)
+    {
+        info->user_paused = paused;
+        changed = TRUE;
+        if (!paused)
+        {
+            /* Wake the worker thread blocked in wait_if_paused(). */
+            g_cond_broadcast (&info->pause_cond);
+        }
+    }
+    g_mutex_unlock (&info->pause_mutex);
+
+    if (!changed)
+    {
+        return;
+    }
+
+    /* Keep the elapsed-time timer aligned so the ETA ignores paused time. */
+    if (paused)
+    {
+        nautilus_progress_info_pause (info);
+    }
+    else
+    {
+        nautilus_progress_info_resume (info);
+    }
+}
+
+/* Called from the worker thread. Blocks while the operation is user-paused,
+ * returning immediately once it is resumed or cancelled. */
+void
+nautilus_progress_info_wait_if_paused (NautilusProgressInfo *info)
+{
+    g_mutex_lock (&info->pause_mutex);
+    while (info->user_paused &&
+           !g_cancellable_is_cancelled (info->cancellable))
+    {
+        g_cond_wait (&info->pause_cond, &info->pause_mutex);
+    }
+    g_mutex_unlock (&info->pause_mutex);
 }
 
 void

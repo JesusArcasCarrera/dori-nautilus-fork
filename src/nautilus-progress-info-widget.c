@@ -36,6 +36,7 @@ struct _NautilusProgressInfoWidgetPrivate
     GtkWidget *details;     /* GtkLabel */
     GtkWidget *progress_bar;
     GtkWidget *button;
+    GtkWidget *pause_button;
 };
 
 enum
@@ -53,6 +54,7 @@ static void
 info_finished (NautilusProgressInfoWidget *self)
 {
     gtk_widget_set_sensitive (self->priv->button, FALSE);
+    gtk_widget_set_visible (self->priv->pause_button, FALSE);
     if (!nautilus_progress_info_get_is_cancelled (self->priv->info))
     {
         gtk_button_set_icon_name (GTK_BUTTON (self->priv->button), "file-operation-finished-symbolic");
@@ -65,8 +67,31 @@ static void
 info_cancelled (NautilusProgressInfoWidget *self)
 {
     gtk_widget_set_sensitive (self->priv->button, FALSE);
+    gtk_widget_set_visible (self->priv->pause_button, FALSE);
     gtk_button_set_icon_name (GTK_BUTTON (self->priv->button), "cancel-operation-symbolic");
     gtk_widget_set_has_tooltip (GTK_WIDGET (self->priv->button), FALSE);
+}
+
+static void
+update_pause_button (NautilusProgressInfoWidget *self)
+{
+    gboolean paused = nautilus_progress_info_get_is_user_paused (self->priv->info);
+
+    gtk_button_set_icon_name (GTK_BUTTON (self->priv->pause_button),
+                              paused ? "media-playback-start-symbolic"
+                                     : "media-playback-pause-symbolic");
+    gtk_widget_set_tooltip_text (self->priv->pause_button,
+                                 paused ? _("Resume") : _("Pause"));
+}
+
+static void
+pause_button_clicked (GtkWidget                  *button,
+                      NautilusProgressInfoWidget *self)
+{
+    gboolean paused = nautilus_progress_info_get_is_user_paused (self->priv->info);
+
+    nautilus_progress_info_set_user_paused (self->priv->info, !paused);
+    update_pause_button (self);
 }
 
 static void
@@ -148,6 +173,10 @@ nautilus_progress_info_widget_constructed (GObject *obj)
     gtk_widget_set_sensitive (self->priv->button,
                               !nautilus_progress_info_get_is_finished (self->priv->info) &&
                               !nautilus_progress_info_get_is_cancelled (self->priv->info));
+    gtk_widget_set_visible (self->priv->pause_button,
+                            !nautilus_progress_info_get_is_finished (self->priv->info) &&
+                            !nautilus_progress_info_get_is_cancelled (self->priv->info));
+    update_pause_button (self);
 
     g_signal_connect_swapped (self->priv->info,
                               "changed",
@@ -199,6 +228,8 @@ nautilus_progress_info_widget_init (NautilusProgressInfoWidget *self)
 
     g_signal_connect (self->priv->button, "clicked",
                       G_CALLBACK (button_clicked), self);
+    g_signal_connect (self->priv->pause_button, "clicked",
+                      G_CALLBACK (pause_button_clicked), self);
 }
 
 static void
@@ -230,6 +261,7 @@ nautilus_progress_info_widget_class_init (NautilusProgressInfoWidgetClass *klass
     gtk_widget_class_bind_template_child_private (widget_class, NautilusProgressInfoWidget, details);
     gtk_widget_class_bind_template_child_private (widget_class, NautilusProgressInfoWidget, progress_bar);
     gtk_widget_class_bind_template_child_private (widget_class, NautilusProgressInfoWidget, button);
+    gtk_widget_class_bind_template_child_private (widget_class, NautilusProgressInfoWidget, pause_button);
 }
 
 GtkWidget *

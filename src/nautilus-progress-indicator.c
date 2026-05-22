@@ -6,6 +6,8 @@
 
 #include "nautilus-progress-indicator.h"
 
+#include <glib/gi18n.h>
+
 #include "nautilus-file-operations.h"
 #include "nautilus-progress-info.h"
 #include "nautilus-progress-info-manager.h"
@@ -21,7 +23,6 @@
 enum
 {
     PROP_0,
-    PROP_POPOVER_POSITION,
     PROP_REVEAL,
     N_PROPS
 };
@@ -37,13 +38,12 @@ struct _NautilusProgressIndicator
     guint operations_button_attention_timeout_id;
 
     GtkWidget *operations_button;
-    GtkWidget *operations_popover;
-    GtkWidget *operations_list;
+    GtkWidget *operations_window;
+    GtkWidget *operations_window_list;
     GListStore *progress_infos_model;
     GtkWidget *sidebar_list;
 
     gboolean reveal;
-    GtkPositionType popover_position;
 
     NautilusProgressInfoManager *progress_manager;
 };
@@ -214,7 +214,8 @@ on_progress_info_finished (NautilusProgressIndicator *self,
     /* If destination is null, don't show a notification. This happens when the
      * operation is a trash operation, which we already show a different kind of
      * notification */
-    if (!gtk_widget_is_visible (self->operations_popover) &&
+    if ((self->operations_window == NULL ||
+         !gtk_widget_is_visible (self->operations_window)) &&
         folder_to_open != NULL)
     {
         gboolean was_quick = nautilus_progress_info_get_total_elapsed_time (info) <= OPERATION_MINIMUM_TIME;
@@ -274,12 +275,6 @@ update_operations (NautilusProgressIndicator *self)
     {
         add_operations_button_attention_style (self);
         nautilus_progress_indicator_set_reveal (self, TRUE);
-    }
-
-    /* Since we removed the info widgets, we need to restore the focus */
-    if (gtk_widget_get_visible (self->operations_popover))
-    {
-        gtk_widget_grab_focus (self->operations_popover);
     }
 }
 
@@ -358,11 +353,11 @@ on_new_progress_info (NautilusProgressInfoManager *manager,
 }
 
 static void
-on_operations_popover_notify_visible (NautilusProgressIndicator *self,
-                                      GParamSpec                *pspec,
-                                      GObject                   *popover)
+on_operations_window_visible_changed (NautilusProgressIndicator *self)
 {
-    if (gtk_widget_get_visible (GTK_WIDGET (popover)))
+    /* While the operations window is open, count as a viewer so finished
+     * operations are not auto-removed from under the user. */
+    if (gtk_widget_get_visible (self->operations_window))
     {
         unschedule_remove_finished_operations (self);
         nautilus_progress_manager_add_viewer (self->progress_manager,
@@ -373,6 +368,15 @@ on_operations_popover_notify_visible (NautilusProgressIndicator *self,
         nautilus_progress_manager_remove_viewer (self->progress_manager,
                                                  G_OBJECT (self));
     }
+}
+
+static gboolean
+on_operations_window_close_request (NautilusProgressIndicator *self)
+{
+    /* Keep the window alive so it can be reopened; just hide it. */
+    gtk_widget_set_visible (self->operations_window, FALSE);
+
+    return GDK_EVENT_STOP;
 }
 
 static void
@@ -406,11 +410,76 @@ operations_list_create_widget (GObject  *item,
 }
 
 static void
-direction_changed (GtkWidget        *self,
-                   GtkTextDirection  previous_direction,
-                   gpointer          user_data)
+ensure_operations_window (NautilusProgressIndicator *self)
 {
-    g_object_notify_by_pspec (G_OBJECT (self), properties[PROP_POPOVER_POSITION]);
+    GtkWidget *list_box;
+    GtkWidget *scrolled;
+    GtkWidget *header_bar;
+    GtkWidget *toolbar_view;
+    GtkRoot *root;
+
+    if (self->operations_window != NULL)
+    {
+        return;
+    }
+
+    list_box = gtk_list_box_new ();
+    gtk_list_box_set_selection_mode (GTK_LIST_BOX (list_box), GTK_SELECTION_NONE);
+    gtk_list_box_set_activate_on_single_click (GTK_LIST_BOX (list_box), FALSE);
+    gtk_widget_add_css_class (list_box, "operations-list");
+    gtk_widget_add_css_class (list_box, "boxed-list");
+    gtk_widget_set_valign (list_box, GTK_ALIGN_START);
+    gtk_widget_set_margin_top (list_box, 12);
+    gtk_widget_set_margin_bottom (list_box, 12);
+    gtk_widget_set_margin_start (list_box, 12);
+    gtk_widget_set_margin_end (list_box, 12);
+    gtk_list_box_bind_model (GTK_LIST_BOX (list_box),
+                             G_LIST_MODEL (self->progress_infos_model),
+                             (GtkListBoxCreateWidgetFunc) operations_list_create_widget,
+                             NULL, NULL);
+    self->operations_window_list = list_box;
+
+    scrolled = gtk_scrolled_window_new ();
+    gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scrolled),
+                                    GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scrolled), list_box);
+
+    header_bar = adw_header_bar_new ();
+
+    toolbar_view = adw_toolbar_view_new ();
+    adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (toolbar_view), header_bar);
+    adw_toolbar_view_set_content (ADW_TOOLBAR_VIEW (toolbar_view), scrolled);
+
+    self->operations_window = adw_window_new ();
+    gtk_window_set_title (GTK_WINDOW (self->operations_window), _("File Operations"));
+    gtk_window_set_default_size (GTK_WINDOW (self->operations_window), 500, 480);
+    adw_window_set_content (ADW_WINDOW (self->operations_window), toolbar_view);
+
+    root = gtk_widget_get_root (GTK_WIDGET (self));
+    if (GTK_IS_WINDOW (root))
+    {
+        /* Transient (stays above its window) but not destroy-with-parent:
+         * this indicator owns the window and frees it in dispose, so the
+         * pointer must not be invalidated behind our back. */
+        gtk_window_set_transient_for (GTK_WINDOW (self->operations_window),
+                                      GTK_WINDOW (root));
+    }
+
+    g_signal_connect_swapped (self->operations_window, "close-request",
+                              G_CALLBACK (on_operations_window_close_request),
+                              self);
+    g_signal_connect_swapped (self->operations_window, "notify::visible",
+                              G_CALLBACK (on_operations_window_visible_changed),
+                              self);
+}
+
+static void
+on_operations_button_clicked (NautilusProgressIndicator *self,
+                              GtkButton                 *button)
+{
+    ensure_operations_window (self);
+
+    gtk_window_present (GTK_WINDOW (self->operations_window));
 }
 
 static void
@@ -423,49 +492,9 @@ nautilus_progress_indicator_get_property (GObject    *object,
 
     switch (property_id)
     {
-        case (PROP_POPOVER_POSITION):
-        {
-            /* Handles the default value of zero coming from the breakpoint */
-            if (self->popover_position <= GTK_POS_RIGHT)
-            {
-                guint popover_position = (gtk_widget_get_direction (GTK_WIDGET (self)) != GTK_TEXT_DIR_RTL) ?
-                                         GTK_POS_RIGHT : GTK_POS_LEFT;
-
-                g_value_set_enum (value, popover_position);
-            }
-            else
-            {
-                g_value_set_enum (value, self->popover_position);
-            }
-        }
-        break;
-
         case (PROP_REVEAL):
         {
             g_value_set_boolean (value, self->reveal);
-        }
-        break;
-
-        default:
-        {
-            G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
-        }
-    }
-}
-
-static void
-nautilus_progress_indicator_set_property (GObject      *object,
-                                          guint         property_id,
-                                          const GValue *value,
-                                          GParamSpec   *pspec)
-{
-    NautilusProgressIndicator *self = NAUTILUS_PROGRESS_INDICATOR (object);
-
-    switch (property_id)
-    {
-        case (PROP_POPOVER_POSITION):
-        {
-            self->popover_position = g_value_get_enum (value);
         }
         break;
 
@@ -490,11 +519,6 @@ nautilus_progress_indicator_constructed (GObject *object)
                              G_CONNECT_DEFAULT);
 
     self->progress_infos_model = g_list_store_new (NAUTILUS_TYPE_PROGRESS_INFO);
-    gtk_list_box_bind_model (GTK_LIST_BOX (self->operations_list),
-                             G_LIST_MODEL (self->progress_infos_model),
-                             (GtkListBoxCreateWidgetFunc) operations_list_create_widget,
-                             NULL,
-                             NULL);
 
     update_operations (self);
 
@@ -503,17 +527,19 @@ nautilus_progress_indicator_constructed (GObject *object)
     g_autoptr (GtkNoSelection) selection_model = gtk_no_selection_new (G_LIST_MODEL (slice));
 
     gtk_list_view_set_model (GTK_LIST_VIEW (self->sidebar_list), GTK_SELECTION_MODEL (selection_model));
-
-    g_signal_connect (self->operations_popover, "show",
-                      (GCallback) gtk_widget_grab_focus, NULL);
-    g_signal_connect_swapped (self->operations_popover, "closed",
-                              (GCallback) gtk_widget_grab_focus, self);
 }
 
 static void
 nautilus_progress_indicator_dispose (GObject *obj)
 {
     NautilusProgressIndicator *self = NAUTILUS_PROGRESS_INDICATOR (obj);
+
+    if (self->operations_window != NULL)
+    {
+        g_signal_handlers_disconnect_by_data (self->operations_window, self);
+        gtk_window_destroy (GTK_WINDOW (self->operations_window));
+        self->operations_window = NULL;
+    }
 
     adw_bin_set_child (ADW_BIN (self), NULL);
     gtk_widget_dispose_template (GTK_WIDGET (self), NAUTILUS_TYPE_PROGRESS_INDICATOR);
@@ -546,21 +572,15 @@ nautilus_progress_indicator_class_init (NautilusProgressIndicatorClass *klass)
     object_class->dispose = nautilus_progress_indicator_dispose;
     object_class->finalize = nautilus_progress_indicator_finalize;
     object_class->get_property = nautilus_progress_indicator_get_property;
-    object_class->set_property = nautilus_progress_indicator_set_property;
 
     gtk_widget_class_set_template_from_resource (widget_class,
                                                  "/org/gnome/nautilus/ui/nautilus-progress-indicator.ui");
     gtk_widget_class_bind_template_child (widget_class, NautilusProgressIndicator, operations_button);
-    gtk_widget_class_bind_template_child (widget_class, NautilusProgressIndicator, operations_popover);
-    gtk_widget_class_bind_template_child (widget_class, NautilusProgressIndicator, operations_list);
     gtk_widget_class_bind_template_child (widget_class, NautilusProgressIndicator, sidebar_list);
 
     gtk_widget_class_bind_template_callback (widget_class, get_paintable);
-    gtk_widget_class_bind_template_callback (widget_class, on_operations_popover_notify_visible);
+    gtk_widget_class_bind_template_callback (widget_class, on_operations_button_clicked);
 
-    properties[PROP_POPOVER_POSITION] = g_param_spec_enum ("popover-position", NULL, NULL,
-                                                           GTK_TYPE_POSITION_TYPE, 0,
-                                                           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
     properties[PROP_REVEAL] = g_param_spec_boolean ("reveal", NULL, NULL, FALSE,
                                                     G_PARAM_READABLE | G_PARAM_STATIC_STRINGS);
 
@@ -571,6 +591,4 @@ static void
 nautilus_progress_indicator_init (NautilusProgressIndicator *self)
 {
     gtk_widget_init_template (GTK_WIDGET (self));
-
-    g_signal_connect (self, "direction-changed", G_CALLBACK (direction_changed), NULL);
 }

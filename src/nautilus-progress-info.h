@@ -57,6 +57,10 @@ void          nautilus_progress_info_start           (NautilusProgressInfo *info
 void          nautilus_progress_info_finish          (NautilusProgressInfo *info);
 void          nautilus_progress_info_pause           (NautilusProgressInfo *info);
 void          nautilus_progress_info_resume          (NautilusProgressInfo *info);
+void          nautilus_progress_info_set_user_paused (NautilusProgressInfo *info,
+                                                      gboolean              paused);
+gboolean      nautilus_progress_info_get_is_user_paused (NautilusProgressInfo *info);
+void          nautilus_progress_info_wait_if_paused  (NautilusProgressInfo *info);
 void          nautilus_progress_info_set_status      (NautilusProgressInfo *info,
 						      const char           *status,
                                                       const char           *short_status);

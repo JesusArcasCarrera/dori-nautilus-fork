@@ -4,34 +4,10 @@ using Adw 1;
 template $NautilusProgressIndicator: Adw.Bin {
   hexpand: true;
 
-  child: MenuButton operations_button {
+  child: Button operations_button {
     tooltip-text: _("Show File Operations");
-    direction: right;
 
-    popover: Popover operations_popover {
-      position: bind template.popover-position;
-
-      child: ScrolledWindow {
-        hscrollbar-policy: never;
-        max-content-height: 270;
-        propagate-natural-height: true;
-
-        child: ListBox operations_list {
-          margin-start: 6;
-          margin-end: 6;
-          margin-top: 6;
-          margin-bottom: 6;
-          selection-mode: none;
-          activate-on-single-click: false;
-
-          styles [
-            "operations-list",
-          ]
-        };
-      };
-
-      notify::visible => $on_operations_popover_notify_visible(template);
-    };
+    clicked => $on_operations_button_clicked(template);
 
     styles [
       "flat",

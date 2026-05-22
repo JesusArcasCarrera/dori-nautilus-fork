@@ -3173,6 +3173,12 @@ report_copy_progress (CopyMoveJob  *copy_job,
 
     job = (CommonJob *) copy_job;
 
+    /* Block here while the user has paused the operation. Called on every
+     * progress tick, including mid-file from copy_file_progress_callback(),
+     * so a pause takes effect promptly for both many small files and a
+     * single large one. */
+    nautilus_progress_info_wait_if_paused (job->progress);
+
     is_move = copy_job->is_move;
 
     now = g_get_monotonic_time ();
