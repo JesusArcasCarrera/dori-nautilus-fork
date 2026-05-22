@@ -40,11 +40,16 @@ static void
 update_icon (NautilusGridCell *self)
 {
     g_autoptr (NautilusViewItem) item = nautilus_view_cell_get_item (NAUTILUS_VIEW_CELL (self));
+    gboolean is_cut = FALSE;
 
     g_return_if_fail (item != NULL);
 
-    /* The cut affordance is drawn as an overlay in snapshot(); the thumbnail
-     * stays visible underneath, so the icon is set unconditionally here. */
+    g_object_get (item, "is-cut", &is_cut, NULL);
+
+    /* Dim the thumbnail while keeping it visible: the cut affordance is
+     * overlaid in snapshot() instead of replacing the preview. */
+    gtk_widget_set_opacity (self->icon, is_cut ? 0.55 : 1.0);
+
     g_autoptr (GdkPaintable) icon_paintable = NULL;
     NautilusFile *file = nautilus_view_item_get_file (item);
     guint icon_size;
@@ -386,32 +391,32 @@ snapshot (GtkWidget   *widget,
     NautilusGridCell *self = NAUTILUS_GRID_CELL (widget);
     g_autoptr (NautilusViewItem) item = nautilus_view_cell_get_item (NAUTILUS_VIEW_CELL (self));
     gboolean is_cut = FALSE;
+    AdwStyleManager *style_manager;
+    gboolean is_high_contrast;
+    guint icon_size;
+    graphene_rect_t dash_bounds, icon_bounds;
+    GdkRGBA color, dashed_border_color, icon_color;
+    double border_opacity;
+    double dim_opacity;
+
+    /* Draw the cell normally first. The thumbnail is dimmed via the icon
+     * widget's own opacity (see update_icon), so we just overlay the cut
+     * affordance on top here, without manipulating the snapshot stack. */
+    GTK_WIDGET_CLASS (nautilus_grid_cell_parent_class)->snapshot (widget, snapshot);
 
     if (item != NULL)
     {
         g_object_get (item, "is-cut", &is_cut, NULL);
     }
-
     if (!is_cut)
     {
-        GTK_WIDGET_CLASS (nautilus_grid_cell_parent_class)->snapshot (widget, snapshot);
         return;
     }
 
-    AdwStyleManager *style_manager = adw_style_manager_get_default ();
-    gboolean is_high_contrast = adw_style_manager_get_high_contrast (style_manager);
-    guint icon_size;
-    graphene_rect_t dash_bounds, icon_bounds;
-    GdkRGBA color, dashed_border_color, icon_color;
-    const double border_opacity = is_high_contrast ? 0.5 : 0.15;
-    const double dim_opacity = is_high_contrast ? 0.9 : 0.55;
-    const double content_opacity = is_high_contrast ? 0.7 : 0.55;
-
-    /* Draw the regular cell content (thumbnail included) dimmed, then overlay
-     * the cut affordance on top, instead of hiding the thumbnail behind it. */
-    gtk_snapshot_push_opacity (snapshot, content_opacity);
-    GTK_WIDGET_CLASS (nautilus_grid_cell_parent_class)->snapshot (widget, snapshot);
-    gtk_snapshot_pop (snapshot);
+    style_manager = adw_style_manager_get_default ();
+    is_high_contrast = adw_style_manager_get_high_contrast (style_manager);
+    border_opacity = is_high_contrast ? 0.5 : 0.15;
+    dim_opacity = is_high_contrast ? 0.9 : 0.55;
 
     g_object_get (self, "icon-size", &icon_size, NULL);
     dash_bounds = GRAPHENE_RECT_INIT (EMBLEMS_BOX_WIDTH, 0, icon_size, icon_size);

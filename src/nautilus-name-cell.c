@@ -137,11 +137,16 @@ static void
 update_icon (NautilusNameCell *self)
 {
     g_autoptr (NautilusViewItem) item = nautilus_view_cell_get_item (NAUTILUS_VIEW_CELL (self));
+    gboolean is_cut = FALSE;
 
     g_return_if_fail (item != NULL);
 
-    /* The cut affordance is drawn as an overlay in snapshot(); the thumbnail
-     * stays visible underneath, so the icon is set unconditionally here. */
+    g_object_get (item, "is-cut", &is_cut, NULL);
+
+    /* Dim the thumbnail while keeping it visible: the cut affordance is
+     * overlaid in snapshot() instead of replacing the preview. */
+    gtk_widget_set_opacity (self->icon, is_cut ? 0.55 : 1.0);
+
     guint icon_size;
     g_autoptr (GdkPaintable) icon_paintable = NULL;
     NautilusFile *file = nautilus_view_item_get_file (item);
@@ -389,28 +394,26 @@ snapshot (GtkWidget   *widget,
     NautilusNameCell *self = NAUTILUS_NAME_CELL (widget);
     g_autoptr (NautilusViewItem) item = nautilus_view_cell_get_item (NAUTILUS_VIEW_CELL (self));
     gboolean is_cut = FALSE;
+    AdwStyleManager *style_manager;
+    gboolean is_high_contrast;
     graphene_rect_t dash_bounds;
+
+    /* Draw the cell normally first. The thumbnail is dimmed via the icon
+     * widget's own opacity (see update_icon), so we just overlay the cut
+     * affordance on top here, without manipulating the snapshot stack. */
+    GTK_WIDGET_CLASS (nautilus_name_cell_parent_class)->snapshot (widget, snapshot);
 
     if (item != NULL)
     {
         g_object_get (item, "is-cut", &is_cut, NULL);
     }
-
     if (!is_cut)
     {
-        GTK_WIDGET_CLASS (nautilus_name_cell_parent_class)->snapshot (widget, snapshot);
         return;
     }
 
-    AdwStyleManager *style_manager = adw_style_manager_get_default ();
-    gboolean is_high_contrast = adw_style_manager_get_high_contrast (style_manager);
-    const double content_opacity = is_high_contrast ? 0.7 : 0.55;
-
-    /* Draw the cell content (thumbnail included) dimmed, then overlay the cut
-     * affordance on top, instead of hiding the thumbnail behind it. */
-    gtk_snapshot_push_opacity (snapshot, content_opacity);
-    GTK_WIDGET_CLASS (nautilus_name_cell_parent_class)->snapshot (widget, snapshot);
-    gtk_snapshot_pop (snapshot);
+    style_manager = adw_style_manager_get_default ();
+    is_high_contrast = adw_style_manager_get_high_contrast (style_manager);
 
     if (gtk_widget_compute_bounds (self->fixed_height_box, widget, &dash_bounds))
     {
