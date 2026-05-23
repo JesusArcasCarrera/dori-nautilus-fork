@@ -535,6 +535,45 @@ location_is_xdg_special_dir (GFile *location)
     return FALSE;
 }
 
+/* Tooltip for a mount entry in the sidebar: parse-friendly path plus a
+ * "X free of Y" line when the filesystem reports it. Skipped for non-local
+ * mounts so the synchronous query doesn't stall the sidebar on slow
+ * network shares. */
+static char *
+build_mount_tooltip (GFile *root)
+{
+    g_autofree char *path = g_file_get_parse_name (root);
+    g_autoptr (GFileInfo) info = NULL;
+    guint64 total;
+    guint64 free_bytes;
+    g_autofree char *total_str = NULL;
+    g_autofree char *free_str = NULL;
+
+    if (!g_file_is_native (root))
+    {
+        return g_steal_pointer (&path);
+    }
+
+    info = g_file_query_filesystem_info (root,
+                                         G_FILE_ATTRIBUTE_FILESYSTEM_SIZE ","
+                                         G_FILE_ATTRIBUTE_FILESYSTEM_FREE,
+                                         NULL, NULL);
+    if (info == NULL ||
+        !g_file_info_has_attribute (info, G_FILE_ATTRIBUTE_FILESYSTEM_SIZE) ||
+        !g_file_info_has_attribute (info, G_FILE_ATTRIBUTE_FILESYSTEM_FREE))
+    {
+        return g_steal_pointer (&path);
+    }
+
+    total = g_file_info_get_attribute_uint64 (info, G_FILE_ATTRIBUTE_FILESYSTEM_SIZE);
+    free_bytes = g_file_info_get_attribute_uint64 (info, G_FILE_ATTRIBUTE_FILESYSTEM_FREE);
+    total_str = g_format_size (total);
+    free_str = g_format_size (free_bytes);
+
+    /* Translators: drive tooltip, %s = mount path, free space, total. */
+    return g_strdup_printf (_("%s\n%s free of %s"), path, free_str, total_str);
+}
+
 static char *
 get_home_directory_uri (void)
 {
@@ -952,7 +991,7 @@ update_places (NautilusSidebar *sidebar)
                     root = g_mount_get_default_location (mount);
                     mount_uri = g_file_get_uri (root);
                     name = g_mount_get_name (mount);
-                    tooltip = g_file_get_parse_name (root);
+                    tooltip = build_mount_tooltip (root);
 
                     add_place (sidebar, (is_external_volume (volume) ?
                                          NAUTILUS_SIDEBAR_ROW_EXTERNAL_MOUNT :
@@ -1056,7 +1095,7 @@ update_places (NautilusSidebar *sidebar)
             start_icon = g_mount_get_symbolic_icon (mount);
             root = g_mount_get_default_location (mount);
             mount_uri = g_file_get_uri (root);
-            tooltip = g_file_get_parse_name (root);
+            tooltip = build_mount_tooltip (root);
             name = g_mount_get_name (mount);
             add_place (sidebar, (is_external_volume (volume) ?
                                  NAUTILUS_SIDEBAR_ROW_EXTERNAL_MOUNT :
@@ -1121,7 +1160,7 @@ update_places (NautilusSidebar *sidebar)
         start_icon = g_mount_get_symbolic_icon (mount);
         mount_uri = g_file_get_uri (root);
         name = g_mount_get_name (mount);
-        tooltip = g_file_get_parse_name (root);
+        tooltip = build_mount_tooltip (root);
         add_place (sidebar, NAUTILUS_SIDEBAR_ROW_EXTERNAL_MOUNT,
                    NAUTILUS_SIDEBAR_SECTION_MOUNTS,
                    name, start_icon, NULL, mount_uri,
@@ -1176,7 +1215,7 @@ update_places (NautilusSidebar *sidebar)
         start_icon = g_mount_get_symbolic_icon (mount);
         mount_uri = g_file_get_uri (root);
         name = g_mount_get_name (mount);
-        tooltip = g_file_get_parse_name (root);
+        tooltip = build_mount_tooltip (root);
         add_place (sidebar, NAUTILUS_SIDEBAR_ROW_EXTERNAL_MOUNT,
                    NAUTILUS_SIDEBAR_SECTION_MOUNTS,
                    name, start_icon, NULL, mount_uri,
