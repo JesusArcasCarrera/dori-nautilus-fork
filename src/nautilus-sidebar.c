@@ -499,6 +499,42 @@ path_is_home_dir (const char *path)
     return res;
 }
 
+/* Whether @location is one of the XDG user-special directories. Used to
+ * route Documents/Downloads/Music/... into their own sidebar section so the
+ * user's actual bookmarks aren't drowned in defaults. */
+static gboolean
+location_is_xdg_special_dir (GFile *location)
+{
+    static const GUserDirectory xdg_kinds[] = {
+        G_USER_DIRECTORY_DESKTOP,
+        G_USER_DIRECTORY_DOCUMENTS,
+        G_USER_DIRECTORY_DOWNLOAD,
+        G_USER_DIRECTORY_MUSIC,
+        G_USER_DIRECTORY_PICTURES,
+        G_USER_DIRECTORY_PUBLIC_SHARE,
+        G_USER_DIRECTORY_TEMPLATES,
+        G_USER_DIRECTORY_VIDEOS,
+    };
+    const char *home = g_get_home_dir ();
+
+    for (gsize i = 0; i < G_N_ELEMENTS (xdg_kinds); i++)
+    {
+        const char *path = g_get_user_special_dir (xdg_kinds[i]);
+        g_autoptr (GFile) candidate = NULL;
+
+        if (path == NULL || (home != NULL && g_str_equal (path, home)))
+        {
+            continue;
+        }
+        candidate = g_file_new_for_path (path);
+        if (g_file_equal (location, candidate))
+        {
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
 static char *
 get_home_directory_uri (void)
 {
@@ -760,6 +796,93 @@ update_places (NautilusSidebar *sidebar)
         g_object_unref (start_icon);
     }
 
+    /* XDG user-special directories (Documents, Downloads, Music, …) get
+     * their own section between the built-ins and the user bookmarks, so
+     * defaults stop drowning user-added bookmarks. */
+    {
+        static const struct
+        {
+            GUserDirectory dir;
+            const char    *icon;
+        } xdg_specs[] = {
+            { G_USER_DIRECTORY_DOCUMENTS,     "folder-documents-symbolic"   },
+            { G_USER_DIRECTORY_DOWNLOAD,      "folder-download-symbolic"    },
+            { G_USER_DIRECTORY_MUSIC,         "folder-music-symbolic"       },
+            { G_USER_DIRECTORY_PICTURES,      "folder-pictures-symbolic"    },
+            { G_USER_DIRECTORY_VIDEOS,        "folder-videos-symbolic"      },
+            { G_USER_DIRECTORY_PUBLIC_SHARE,  "folder-publicshare-symbolic" },
+            { G_USER_DIRECTORY_TEMPLATES,     "folder-templates-symbolic"   },
+        };
+        const char *home_path = g_get_home_dir ();
+
+        for (gsize i = 0; i < G_N_ELEMENTS (xdg_specs); i++)
+        {
+            const char *path = g_get_user_special_dir (xdg_specs[i].dir);
+            g_autofree char *xdg_uri = NULL;
+            g_autofree char *xdg_name = NULL;
+
+            if (path == NULL ||
+                (home_path != NULL && g_str_equal (path, home_path)))
+            {
+                continue;
+            }
+            xdg_uri = g_filename_to_uri (path, NULL, NULL);
+            if (xdg_uri == NULL)
+            {
+                continue;
+            }
+            xdg_name = g_path_get_basename (path);
+            start_icon = g_themed_icon_new_with_default_fallbacks (xdg_specs[i].icon);
+            add_place (sidebar, NAUTILUS_SIDEBAR_ROW_BUILT_IN,
+                       NAUTILUS_SIDEBAR_SECTION_XDG_DIRS,
+                       xdg_name, start_icon, NULL, xdg_uri,
+                       NULL, NULL, NULL, NULL, 0,
+                       path);
+            g_object_unref (start_icon);
+        }
+    }
+
+    /* User bookmarks: come right after the XDG dirs so the visual order
+     * is built-ins → XDG → bookmarks → drives. XDG-matching entries are
+     * filtered out so they don't appear in two sections at once. */
+    bookmarks = nautilus_bookmark_list_get_all (sidebar->bookmark_list);
+    /* Needs to start from 1 so that bookmark drag placeholder can come first. */
+    index = 1;
+    for (GList *bl = bookmarks; bl != NULL; bl = bl->next)
+    {
+        GtkWidget *bookmark_row;
+        GFile *location = nautilus_bookmark_get_location (bl->data);
+        g_autofree char *mount_uri = nautilus_bookmark_get_uri (bl->data);
+        gboolean is_native;
+
+        if (location_is_xdg_special_dir (location))
+        {
+            continue;
+        }
+
+        is_native = g_file_is_native (location);
+        tooltip = is_native ? g_file_get_path (location) : g_uri_unescape_string (mount_uri, NULL);
+
+        bookmark_row = add_place (sidebar, NAUTILUS_SIDEBAR_ROW_BOOKMARK,
+                                  NAUTILUS_SIDEBAR_SECTION_BOOKMARKS,
+                                  nautilus_bookmark_get_name (bl->data),
+                                  NULL,
+                                  NULL, mount_uri, NULL, NULL, NULL, NULL, index, tooltip);
+        g_object_bind_property (bl->data, "symbolic-icon", bookmark_row, "start-icon", G_BINDING_SYNC_CREATE);
+        index++;
+        g_free (tooltip);
+    }
+
+    /* Add new bookmark row */
+    new_bookmark_icon = g_themed_icon_new ("bookmark-new-symbolic");
+    sidebar->new_bookmark_row = add_place (sidebar, NAUTILUS_SIDEBAR_ROW_NEW_BOOKMARK,
+                                           NAUTILUS_SIDEBAR_SECTION_BOOKMARKS,
+                                           _("New bookmark"), new_bookmark_icon, NULL, NULL,
+                                           NULL, NULL, NULL, NULL, 0,
+                                           _("Add a new bookmark"));
+    gtk_widget_add_css_class (sidebar->new_bookmark_row, "sidebar-new-bookmark-row");
+    g_object_unref (new_bookmark_icon);
+
     /* Cloud providers */
 #ifdef HAVE_CLOUDPROVIDERS
     cloud_providers = cloud_providers_collector_get_providers (sidebar->cloud_manager);
@@ -1012,41 +1135,8 @@ update_places (NautilusSidebar *sidebar)
     }
     g_list_free (mounts);
 
-    /* add bookmarks */
-    bookmarks = nautilus_bookmark_list_get_all (sidebar->bookmark_list);
-    /* Needs to start from 1 so that bookmark drag placeholder can come first. */
-    index = 1;
-
-    for (GList *l = bookmarks; l != NULL; l = l->next)
-    {
-        GtkWidget *row;
-
-        GFile *location = nautilus_bookmark_get_location (l->data);
-        g_autofree char *mount_uri = nautilus_bookmark_get_uri (l->data);
-
-        gboolean is_native = g_file_is_native (location);
-        tooltip = is_native ? g_file_get_path (location) : g_uri_unescape_string (mount_uri, NULL);
-
-        row = add_place (sidebar, NAUTILUS_SIDEBAR_ROW_BOOKMARK,
-                         NAUTILUS_SIDEBAR_SECTION_BOOKMARKS,
-                         nautilus_bookmark_get_name (l->data),
-                         NULL,
-                         NULL, mount_uri, NULL, NULL, NULL, NULL, index, tooltip);
-        g_object_bind_property (l->data, "symbolic-icon", row, "start-icon", G_BINDING_SYNC_CREATE);
-        index++;
-
-        g_free (tooltip);
-    }
-
-    /* Add new bookmark row */
-    new_bookmark_icon = g_themed_icon_new ("bookmark-new-symbolic");
-    sidebar->new_bookmark_row = add_place (sidebar, NAUTILUS_SIDEBAR_ROW_NEW_BOOKMARK,
-                                           NAUTILUS_SIDEBAR_SECTION_BOOKMARKS,
-                                           _("New bookmark"), new_bookmark_icon, NULL, NULL,
-                                           NULL, NULL, NULL, NULL, 0,
-                                           _("Add a new bookmark"));
-    gtk_widget_add_css_class (sidebar->new_bookmark_row, "sidebar-new-bookmark-row");
-    g_object_unref (new_bookmark_icon);
+    /* The XDG and user-bookmarks sections were already populated earlier,
+     * so the visual order ends up as built-ins → XDG → bookmarks → drives. */
 
     /* network */
     network_volumes = g_list_reverse (network_volumes);
