@@ -1414,18 +1414,35 @@ nautilus_list_base_setup_directory (NautilusListBase  *self,
     NAUTILUS_LIST_BASE_CLASS (G_OBJECT_GET_CLASS (self))->setup_directory (self, directory);
 }
 
+typedef struct
+{
+    char *needle_folded;
+} FilterTextData;
+
+static void
+filter_text_data_free (gpointer ptr)
+{
+    FilterTextData *data = ptr;
+
+    if (data == NULL)
+    {
+        return;
+    }
+    g_free (data->needle_folded);
+    g_free (data);
+}
+
 static gboolean
 filter_text_match_cb (gpointer item,
                       gpointer user_data)
 {
-    const char *needle = user_data;
+    FilterTextData *data = user_data;
     NautilusViewItem *view_item;
     NautilusFile *file;
     const char *name;
     g_autofree char *name_folded = NULL;
-    g_autofree char *needle_folded = NULL;
 
-    if (needle == NULL || *needle == '\0')
+    if (data == NULL || data->needle_folded == NULL || *data->needle_folded == '\0')
     {
         return TRUE;
     }
@@ -1447,12 +1464,11 @@ filter_text_match_cb (gpointer item,
     }
 
     name_folded = g_utf8_casefold (name, -1);
-    needle_folded = g_utf8_casefold (needle, -1);
 
     /* Prefix match: typing "c" shows files starting with C, not every file
-     * that happens to contain a C anywhere. This stays consistent with how
-     * the "locate" mode interprets the same typed string. */
-    return g_str_has_prefix (name_folded, needle_folded);
+     * that happens to contain a C anywhere. The needle is folded once per
+     * keystroke (in set_filter_text) rather than once per item. */
+    return g_str_has_prefix (name_folded, data->needle_folded);
 }
 
 void
@@ -1460,7 +1476,8 @@ nautilus_list_base_set_filter_text (NautilusListBase *self,
                                     const char       *text)
 {
     NautilusViewModel *model;
-    g_autoptr (GtkCustomFilter) filter = NULL;
+    GtkFilter *current;
+    FilterTextData *data;
 
     g_return_if_fail (NAUTILUS_IS_LIST_BASE (self));
 
@@ -1476,9 +1493,27 @@ nautilus_list_base_set_filter_text (NautilusListBase *self,
         return;
     }
 
-    filter = gtk_custom_filter_new (filter_text_match_cb,
-                                    g_strdup (text), g_free);
-    nautilus_view_model_set_filter (model, GTK_FILTER (filter));
+    data = g_new0 (FilterTextData, 1);
+    data->needle_folded = g_utf8_casefold (text, -1);
+
+    current = nautilus_view_model_get_filter (model);
+    if (GTK_IS_CUSTOM_FILTER (current))
+    {
+        /* Reuse the existing GtkCustomFilter: swap its user_data and emit
+         * filter-changed in one shot via gtk_custom_filter_set_filter_func.
+         * This avoids the cost of rebuilding the filter pipeline on every
+         * keystroke. */
+        gtk_custom_filter_set_filter_func (GTK_CUSTOM_FILTER (current),
+                                           filter_text_match_cb,
+                                           data, filter_text_data_free);
+    }
+    else
+    {
+        g_autoptr (GtkCustomFilter) filter = gtk_custom_filter_new (
+            filter_text_match_cb, data, filter_text_data_free);
+
+        nautilus_view_model_set_filter (model, GTK_FILTER (filter));
+    }
 }
 
 gboolean
