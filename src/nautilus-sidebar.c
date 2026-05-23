@@ -1587,7 +1587,30 @@ start_drop_feedback (NautilusSidebar *sidebar,
             file = nautilus_file_get (source_list->data);
             if (nautilus_file_is_directory (file))
             {
-                nautilus_sidebar_row_reveal (NAUTILUS_SIDEBAR_ROW (sidebar->new_bookmark_row));
+                /* The XDG section is itself a drop target for "add to places",
+                 * so revealing the New Bookmark row while hovering it would
+                 * shift the list under the cursor and steal the drop. Only
+                 * arm the New Bookmark row when the cursor is over the
+                 * bookmarks section (or no specific row yet). */
+                gboolean reveal_new_bookmark = TRUE;
+
+                if (sidebar->hover_row != NULL &&
+                    NAUTILUS_IS_SIDEBAR_ROW (sidebar->hover_row))
+                {
+                    NautilusSidebarSectionType hover_section_type = NAUTILUS_SIDEBAR_SECTION_INVALID;
+
+                    g_object_get (sidebar->hover_row,
+                                  "section-type", &hover_section_type, NULL);
+                    if (hover_section_type == NAUTILUS_SIDEBAR_SECTION_XDG_DIRS)
+                    {
+                        reveal_new_bookmark = FALSE;
+                    }
+                }
+
+                if (reveal_new_bookmark)
+                {
+                    nautilus_sidebar_row_reveal (NAUTILUS_SIDEBAR_ROW (sidebar->new_bookmark_row));
+                }
             }
         }
     }
