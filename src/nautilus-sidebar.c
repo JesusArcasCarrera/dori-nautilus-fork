@@ -567,11 +567,11 @@ build_mount_tooltip (GFile *root)
 
     total = g_file_info_get_attribute_uint64 (info, G_FILE_ATTRIBUTE_FILESYSTEM_SIZE);
     free_bytes = g_file_info_get_attribute_uint64 (info, G_FILE_ATTRIBUTE_FILESYSTEM_FREE);
-    total_str = g_format_size (total);
     free_str = g_format_size (free_bytes);
+    total_str = g_format_size (total > free_bytes ? total - free_bytes : 0);
 
-    /* Translators: drive tooltip, %s = mount path, free space, total. */
-    return g_strdup_printf (_("%s\n%s free of %s"), path, free_str, total_str);
+    /* "free / used" — no translatable text so no .po work for the fork. */
+    return g_strdup_printf ("%s\n%s / %s", path, free_str, total_str);
 }
 
 static char *
