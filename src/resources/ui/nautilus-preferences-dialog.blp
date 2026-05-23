@@ -105,4 +105,14 @@ Adw.PreferencesDialog preferences_dialog {
       }
     }
   }
+
+  Adw.PreferencesPage custom_actions_page {
+    title: _("Custom Actions");
+    icon-name: "view-list-symbolic";
+
+    Adw.PreferencesGroup custom_actions_group {
+      title: _("Context Menu Actions");
+      description: _("User-defined entries shown in the right-click menu. Action files live in ~/.local/share/nemo/actions/ as .nemo_action GKeyFiles (Cinnamon Nemo format). A built-in editor is coming; for now, files are edited by hand and reloaded automatically.");
+    }
+  }
 }

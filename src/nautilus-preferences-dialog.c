@@ -32,6 +32,7 @@
 #include "nautilus-column-utilities.h"
 #include "nautilus-date-utilities.h"
 #include "nautilus-global-preferences.h"
+#include "nemo-action-manager.h"
 
 /* bool preferences */
 #define NAUTILUS_PREFERENCES_DIALOG_FOLDERS_FIRST_WIDGET                       \
@@ -167,6 +168,76 @@ setup_combo (GtkBuilder  *builder,
     adw_combo_row_set_model (combo_row, G_LIST_MODEL (list_store));
 }
 
+/* Populate the "Custom Actions" preferences page with one row per loaded
+ * .nemo_action, in the same order the action manager exposes them (sorted
+ * by Group then Position). Read-only for now; an editor is the next step. */
+static void
+setup_custom_actions_page (GtkBuilder *builder)
+{
+    g_autoptr (NemoActionManager) manager = nemo_action_manager_dup_singleton ();
+    AdwPreferencesGroup *group;
+    GList *actions;
+    const char *last_group = "";
+
+    group = ADW_PREFERENCES_GROUP (gtk_builder_get_object (builder,
+                                                           "custom_actions_group"));
+    actions = nemo_action_manager_get_actions (manager);
+
+    if (actions == NULL)
+    {
+        AdwActionRow *empty = ADW_ACTION_ROW (adw_action_row_new ());
+
+        adw_preferences_row_set_title (ADW_PREFERENCES_ROW (empty),
+                                       _("No custom actions yet"));
+        adw_action_row_set_subtitle (empty,
+                                     _("Drop a .nemo_action file into ~/.local/share/nemo/actions/ to add an entry to the right-click menu."));
+        adw_preferences_group_add (group, GTK_WIDGET (empty));
+        return;
+    }
+
+    for (GList *l = actions; l != NULL; l = l->next)
+    {
+        NemoAction *action = l->data;
+        const char *name = nemo_action_get_name (action);
+        const char *comment = nemo_action_get_comment (action);
+        const char *icon = nemo_action_get_icon_name (action);
+        const char *group_name = nemo_action_get_group (action);
+        AdwActionRow *row;
+
+        if (group_name == NULL)
+        {
+            group_name = "";
+        }
+        if (g_strcmp0 (group_name, last_group) != 0)
+        {
+            /* Section break between groups: a small header row makes the
+             * grouping visible without spawning a whole PreferencesGroup
+             * per group. */
+            AdwActionRow *header = ADW_ACTION_ROW (adw_action_row_new ());
+            g_autofree char *title = g_strdup_printf ("— %s —",
+                                                      *group_name != '\0' ?
+                                                      group_name : _("Ungrouped"));
+
+            adw_preferences_row_set_title (ADW_PREFERENCES_ROW (header), title);
+            gtk_widget_set_sensitive (GTK_WIDGET (header), FALSE);
+            adw_preferences_group_add (group, GTK_WIDGET (header));
+            last_group = group_name;
+        }
+
+        row = ADW_ACTION_ROW (adw_action_row_new ());
+        adw_preferences_row_set_title (ADW_PREFERENCES_ROW (row), name);
+        if (comment != NULL && *comment != '\0')
+        {
+            adw_action_row_set_subtitle (row, comment);
+        }
+        if (icon != NULL && *icon != '\0')
+        {
+            adw_action_row_add_prefix (row, gtk_image_new_from_icon_name (icon));
+        }
+        adw_preferences_group_add (group, GTK_WIDGET (row));
+    }
+}
+
 static void
 nautilus_preferences_dialog_setup (GtkBuilder *builder)
 {
@@ -223,6 +294,8 @@ nautilus_preferences_dialog_setup (GtkBuilder *builder)
                             NAUTILUS_PREFERENCES_DIALOG_TYPE_TO_ACTION_ROW,
                             NAUTILUS_PREFERENCES_TYPE_TO_ACTION,
                             (const char **) type_to_action_values);
+
+    setup_custom_actions_page (builder);
 }
 
 void
