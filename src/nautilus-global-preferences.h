@@ -130,6 +130,15 @@ typedef enum
 #define NAUTILUS_PREFERENCES_SHOW_DELETE_PERMANENTLY "show-delete-permanently"
 #define NAUTILUS_PREFERENCES_SHOW_CREATE_LINK "show-create-link"
 
+/* Sidebar built-in entries and sections */
+#define NAUTILUS_PREFERENCES_SIDEBAR_SHOW_RECENT      "sidebar-show-recent"
+#define NAUTILUS_PREFERENCES_SIDEBAR_SHOW_STARRED     "sidebar-show-starred"
+#define NAUTILUS_PREFERENCES_SIDEBAR_SHOW_DESKTOP     "sidebar-show-desktop"
+#define NAUTILUS_PREFERENCES_SIDEBAR_SHOW_NETWORK     "sidebar-show-network"
+#define NAUTILUS_PREFERENCES_SIDEBAR_SHOW_TRASH       "sidebar-show-trash"
+#define NAUTILUS_PREFERENCES_SIDEBAR_SHOW_XDG_SECTION "sidebar-show-xdg-section"
+#define NAUTILUS_PREFERENCES_SIDEBAR_SHOW_CLOUD       "sidebar-show-cloud"
+
 /* Full Text Search enabled */
 #define NAUTILUS_PREFERENCES_FTS_ENABLED "fts-enabled"
 

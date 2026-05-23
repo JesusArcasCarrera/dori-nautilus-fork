@@ -776,7 +776,9 @@ update_places (NautilusSidebar *sidebar)
     g_object_unref (start_icon);
     g_free (home_uri);
 
-    if (should_show_recent (sidebar))
+    if (should_show_recent (sidebar) &&
+        g_settings_get_boolean (nautilus_preferences,
+                                NAUTILUS_PREFERENCES_SIDEBAR_SHOW_RECENT))
     {
         start_icon = g_themed_icon_new_with_default_fallbacks ("document-open-recent-symbolic");
         add_place (sidebar, NAUTILUS_SIDEBAR_ROW_BUILT_IN,
@@ -787,16 +789,22 @@ update_places (NautilusSidebar *sidebar)
         g_object_unref (start_icon);
     }
 
-    start_icon = g_themed_icon_new_with_default_fallbacks ("starred-symbolic");
-    add_place (sidebar, NAUTILUS_SIDEBAR_ROW_BUILT_IN,
-               NAUTILUS_SIDEBAR_SECTION_DEFAULT_LOCATIONS,
-               _("Starred"), start_icon, NULL, SCHEME_STARRED ":///",
-               NULL, NULL, NULL, NULL, 0,
-               _("Starred Files"));
-    g_object_unref (start_icon);
+    if (g_settings_get_boolean (nautilus_preferences,
+                                NAUTILUS_PREFERENCES_SIDEBAR_SHOW_STARRED))
+    {
+        start_icon = g_themed_icon_new_with_default_fallbacks ("starred-symbolic");
+        add_place (sidebar, NAUTILUS_SIDEBAR_ROW_BUILT_IN,
+                   NAUTILUS_SIDEBAR_SECTION_DEFAULT_LOCATIONS,
+                   _("Starred"), start_icon, NULL, SCHEME_STARRED ":///",
+                   NULL, NULL, NULL, NULL, 0,
+                   _("Starred Files"));
+        g_object_unref (start_icon);
+    }
 
     /* desktop */
-    if (sidebar->show_desktop)
+    if (sidebar->show_desktop &&
+        g_settings_get_boolean (nautilus_preferences,
+                                NAUTILUS_PREFERENCES_SIDEBAR_SHOW_DESKTOP))
     {
         char *mount_uri = get_desktop_directory_uri ();
         if (mount_uri)
@@ -813,16 +821,22 @@ update_places (NautilusSidebar *sidebar)
     }
 
     /* Network view */
-    start_icon = g_themed_icon_new_with_default_fallbacks (ICON_NAME_NETWORK_VIEW);
-    add_place (sidebar, NAUTILUS_SIDEBAR_ROW_BUILT_IN,
-               NAUTILUS_SIDEBAR_SECTION_DEFAULT_LOCATIONS,
-               _("Network"), start_icon, NULL, SCHEME_NETWORK_VIEW ":///",
-               NULL, NULL, NULL, NULL, 0,
-               _("Open Network Locations"));
-    g_object_unref (start_icon);
+    if (g_settings_get_boolean (nautilus_preferences,
+                                NAUTILUS_PREFERENCES_SIDEBAR_SHOW_NETWORK))
+    {
+        start_icon = g_themed_icon_new_with_default_fallbacks (ICON_NAME_NETWORK_VIEW);
+        add_place (sidebar, NAUTILUS_SIDEBAR_ROW_BUILT_IN,
+                   NAUTILUS_SIDEBAR_SECTION_DEFAULT_LOCATIONS,
+                   _("Network"), start_icon, NULL, SCHEME_NETWORK_VIEW ":///",
+                   NULL, NULL, NULL, NULL, 0,
+                   _("Open Network Locations"));
+        g_object_unref (start_icon);
+    }
 
     /* Trash */
-    if (sidebar->show_trash)
+    if (sidebar->show_trash &&
+        g_settings_get_boolean (nautilus_preferences,
+                                NAUTILUS_PREFERENCES_SIDEBAR_SHOW_TRASH))
     {
         start_icon = nautilus_trash_monitor_get_symbolic_icon ();
         sidebar->trash_row = add_place (sidebar, NAUTILUS_SIDEBAR_ROW_BUILT_IN,
@@ -837,7 +851,10 @@ update_places (NautilusSidebar *sidebar)
 
     /* XDG user-special directories (Documents, Downloads, Music, …) get
      * their own section between the built-ins and the user bookmarks, so
-     * defaults stop drowning user-added bookmarks. */
+     * defaults stop drowning user-added bookmarks. Skipped entirely when
+     * the user has disabled the section in Preferences. */
+    if (g_settings_get_boolean (nautilus_preferences,
+                                NAUTILUS_PREFERENCES_SIDEBAR_SHOW_XDG_SECTION))
     {
         static const struct
         {
@@ -924,35 +941,39 @@ update_places (NautilusSidebar *sidebar)
 
     /* Cloud providers */
 #ifdef HAVE_CLOUDPROVIDERS
-    cloud_providers = cloud_providers_collector_get_providers (sidebar->cloud_manager);
-    for (l = sidebar->unready_accounts; l != NULL; l = l->next)
+    if (g_settings_get_boolean (nautilus_preferences,
+                                NAUTILUS_PREFERENCES_SIDEBAR_SHOW_CLOUD))
     {
-        g_signal_handlers_disconnect_by_data (l->data, sidebar);
-    }
-    g_list_free_full (sidebar->unready_accounts, g_object_unref);
-    sidebar->unready_accounts = NULL;
-    for (l = cloud_providers; l != NULL; l = l->next)
-    {
-        cloud_provider = CLOUD_PROVIDERS_PROVIDER (l->data);
-        g_signal_connect_swapped (cloud_provider, "accounts-changed",
-                                  G_CALLBACK (update_places), sidebar);
-        cloud_providers_accounts = cloud_providers_provider_get_accounts (cloud_provider);
-        for (ll = cloud_providers_accounts; ll != NULL; ll = ll->next)
+        cloud_providers = cloud_providers_collector_get_providers (sidebar->cloud_manager);
+        for (l = sidebar->unready_accounts; l != NULL; l = l->next)
         {
-            cloud_provider_account = CLOUD_PROVIDERS_ACCOUNT (ll->data);
-            if (!create_cloud_provider_account_row (sidebar, cloud_provider_account))
+            g_signal_handlers_disconnect_by_data (l->data, sidebar);
+        }
+        g_list_free_full (sidebar->unready_accounts, g_object_unref);
+        sidebar->unready_accounts = NULL;
+        for (l = cloud_providers; l != NULL; l = l->next)
+        {
+            cloud_provider = CLOUD_PROVIDERS_PROVIDER (l->data);
+            g_signal_connect_swapped (cloud_provider, "accounts-changed",
+                                      G_CALLBACK (update_places), sidebar);
+            cloud_providers_accounts = cloud_providers_provider_get_accounts (cloud_provider);
+            for (ll = cloud_providers_accounts; ll != NULL; ll = ll->next)
             {
-                g_signal_connect (cloud_provider_account, "notify::name",
-                                  G_CALLBACK (on_account_updated), sidebar);
-                g_signal_connect (cloud_provider_account, "notify::status",
-                                  G_CALLBACK (on_account_updated), sidebar);
-                g_signal_connect (cloud_provider_account, "notify::status-details",
-                                  G_CALLBACK (on_account_updated), sidebar);
-                g_signal_connect (cloud_provider_account, "notify::path",
-                                  G_CALLBACK (on_account_updated), sidebar);
-                sidebar->unready_accounts = g_list_append (sidebar->unready_accounts,
-                                                           g_object_ref (cloud_provider_account));
-                continue;
+                cloud_provider_account = CLOUD_PROVIDERS_ACCOUNT (ll->data);
+                if (!create_cloud_provider_account_row (sidebar, cloud_provider_account))
+                {
+                    g_signal_connect (cloud_provider_account, "notify::name",
+                                      G_CALLBACK (on_account_updated), sidebar);
+                    g_signal_connect (cloud_provider_account, "notify::status",
+                                      G_CALLBACK (on_account_updated), sidebar);
+                    g_signal_connect (cloud_provider_account, "notify::status-details",
+                                      G_CALLBACK (on_account_updated), sidebar);
+                    g_signal_connect (cloud_provider_account, "notify::path",
+                                      G_CALLBACK (on_account_updated), sidebar);
+                    sidebar->unready_accounts = g_list_append (sidebar->unready_accounts,
+                                                               g_object_ref (cloud_provider_account));
+                    continue;
+                }
             }
         }
     }
@@ -3803,6 +3824,37 @@ nautilus_sidebar_init (NautilusSidebar *sidebar)
 #endif
 
     sidebar->show_trash = TRUE;
+
+    /* Rebuild the sidebar whenever the user toggles one of the visibility
+     * preferences from the Preferences dialog. */
+    g_signal_connect_object (nautilus_preferences,
+                             "changed::" NAUTILUS_PREFERENCES_SIDEBAR_SHOW_RECENT,
+                             G_CALLBACK (update_places), sidebar,
+                             G_CONNECT_SWAPPED);
+    g_signal_connect_object (nautilus_preferences,
+                             "changed::" NAUTILUS_PREFERENCES_SIDEBAR_SHOW_STARRED,
+                             G_CALLBACK (update_places), sidebar,
+                             G_CONNECT_SWAPPED);
+    g_signal_connect_object (nautilus_preferences,
+                             "changed::" NAUTILUS_PREFERENCES_SIDEBAR_SHOW_DESKTOP,
+                             G_CALLBACK (update_places), sidebar,
+                             G_CONNECT_SWAPPED);
+    g_signal_connect_object (nautilus_preferences,
+                             "changed::" NAUTILUS_PREFERENCES_SIDEBAR_SHOW_NETWORK,
+                             G_CALLBACK (update_places), sidebar,
+                             G_CONNECT_SWAPPED);
+    g_signal_connect_object (nautilus_preferences,
+                             "changed::" NAUTILUS_PREFERENCES_SIDEBAR_SHOW_TRASH,
+                             G_CALLBACK (update_places), sidebar,
+                             G_CONNECT_SWAPPED);
+    g_signal_connect_object (nautilus_preferences,
+                             "changed::" NAUTILUS_PREFERENCES_SIDEBAR_SHOW_XDG_SECTION,
+                             G_CALLBACK (update_places), sidebar,
+                             G_CONNECT_SWAPPED);
+    g_signal_connect_object (nautilus_preferences,
+                             "changed::" NAUTILUS_PREFERENCES_SIDEBAR_SHOW_CLOUD,
+                             G_CALLBACK (update_places), sidebar,
+                             G_CONNECT_SWAPPED);
 
     /* populate the sidebar */
     update_places (sidebar);

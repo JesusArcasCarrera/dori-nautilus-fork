@@ -200,6 +200,41 @@
       <summary>How to display file timestamps in the views</summary>
       <description>If set to 'simple', Files will show Today and Yesterday with time, otherwise the exact date without time. If set to 'detailed', it will always show the exact date and time.</description>
     </key>
+    <key type="b" name="sidebar-show-recent">
+      <default>true</default>
+      <summary>Whether to show the Recent entry in the sidebar</summary>
+      <description>If set to true, the sidebar will list a "Recent" shortcut that opens recently used files.</description>
+    </key>
+    <key type="b" name="sidebar-show-starred">
+      <default>true</default>
+      <summary>Whether to show the Starred entry in the sidebar</summary>
+      <description>If set to true, the sidebar will list a "Starred" shortcut that opens the starred files location.</description>
+    </key>
+    <key type="b" name="sidebar-show-desktop">
+      <default>true</default>
+      <summary>Whether to show the Desktop entry in the sidebar</summary>
+      <description>If set to true, the sidebar will list a "Desktop" shortcut that opens the desktop folder.</description>
+    </key>
+    <key type="b" name="sidebar-show-network">
+      <default>true</default>
+      <summary>Whether to show the Network entry in the sidebar</summary>
+      <description>If set to true, the sidebar will list a "Network" shortcut that opens the network locations view.</description>
+    </key>
+    <key type="b" name="sidebar-show-trash">
+      <default>true</default>
+      <summary>Whether to show the Trash entry in the sidebar</summary>
+      <description>If set to true, the sidebar will list a "Trash" shortcut that opens the Trash.</description>
+    </key>
+    <key type="b" name="sidebar-show-xdg-section">
+      <default>true</default>
+      <summary>Whether to show the XDG user directories section in the sidebar</summary>
+      <description>If set to true, the sidebar will include a dedicated section listing the XDG user directories (Documents, Downloads, Music, Pictures, Videos, Public Share and Templates).</description>
+    </key>
+    <key type="b" name="sidebar-show-cloud">
+      <default>true</default>
+      <summary>Whether to show the Cloud providers section in the sidebar</summary>
+      <description>If set to true, the sidebar will include entries for accounts exposed by installed cloud providers.</description>
+    </key>
   </schema>
 
   <schema path="/org/gnome/nautilus/compression/" id="org.gnome.nautilus.compression" gettext-domain="nautilus">

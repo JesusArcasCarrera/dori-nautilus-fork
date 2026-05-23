@@ -106,6 +106,58 @@ Adw.PreferencesDialog preferences_dialog {
     }
   }
 
+  Adw.PreferencesPage sidebar_page {
+    title: _("Sidebar");
+    icon-name: "view-sidebar-start-symbolic";
+
+    Adw.PreferencesGroup {
+      title: _("Built-in Items");
+      description: _("Hide the default shortcuts you don’t use. Bookmarks and mounted drives are always shown.");
+
+      Adw.SwitchRow sidebar_show_recent_row {
+        title: _("_Recent");
+        use-underline: true;
+      }
+
+      Adw.SwitchRow sidebar_show_starred_row {
+        title: _("_Starred");
+        use-underline: true;
+      }
+
+      Adw.SwitchRow sidebar_show_desktop_row {
+        title: _("_Desktop");
+        use-underline: true;
+      }
+
+      Adw.SwitchRow sidebar_show_network_row {
+        title: _("_Network");
+        use-underline: true;
+      }
+
+      Adw.SwitchRow sidebar_show_trash_row {
+        title: _("_Trash");
+        use-underline: true;
+      }
+    }
+
+    Adw.PreferencesGroup {
+      title: _("Sections");
+      description: _("Toggle entire sidebar sections at once.");
+
+      Adw.SwitchRow sidebar_show_xdg_section_row {
+        title: _("_User Folders");
+        subtitle: _("Documents, Downloads, Music, Pictures, Videos, Public Share, Templates.");
+        use-underline: true;
+      }
+
+      Adw.SwitchRow sidebar_show_cloud_row {
+        title: _("_Cloud Providers");
+        subtitle: _("Accounts exposed by installed cloud-provider integrations.");
+        use-underline: true;
+      }
+    }
+  }
+
   Adw.PreferencesPage custom_actions_page {
     title: _("Custom Actions");
     icon-name: "view-list-symbolic";
