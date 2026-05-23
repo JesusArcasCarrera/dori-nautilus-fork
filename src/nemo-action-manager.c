@@ -240,3 +240,24 @@ nemo_action_manager_get_action (NemoActionManager *self,
 
     return NULL;
 }
+
+GFile *
+nemo_action_manager_get_actions_dir (NemoActionManager *self)
+{
+    return self->actions_location;
+}
+
+gboolean
+nemo_action_manager_delete_action (NemoActionManager *self,
+                                   const char        *id,
+                                   GError           **error)
+{
+    g_autoptr (GFile) file = NULL;
+
+    g_return_val_if_fail (NEMO_IS_ACTION_MANAGER (self), FALSE);
+    g_return_val_if_fail (id != NULL, FALSE);
+
+    file = g_file_get_child (self->actions_location, id);
+
+    return g_file_delete (file, NULL, error);
+}

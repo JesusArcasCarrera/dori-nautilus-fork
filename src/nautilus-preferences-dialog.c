@@ -32,6 +32,7 @@
 #include "nautilus-column-utilities.h"
 #include "nautilus-date-utilities.h"
 #include "nautilus-global-preferences.h"
+#include "nemo-action-editor.h"
 #include "nemo-action-manager.h"
 
 /* bool preferences */
@@ -168,19 +169,143 @@ setup_combo (GtkBuilder  *builder,
     adw_combo_row_set_model (combo_row, G_LIST_MODEL (list_store));
 }
 
-/* Populate the "Custom Actions" preferences page with one row per loaded
- * .nemo_action, in the same order the action manager exposes them (sorted
- * by Group then Position). Read-only for now; an editor is the next step. */
+/* The list of rows currently shown in the Custom Actions group; tracked so
+ * we can drop them before repopulating when the action manager fires
+ * "changed". Stored on the group widget via g_object_set_data. */
+#define ROWS_KEY "nemo-custom-actions-rows"
+#define MANAGER_KEY "nemo-custom-actions-manager"
+#define ACTION_ID_KEY "nemo-action-id"
+
+static void rebuild_custom_actions_rows (AdwPreferencesGroup *group,
+                                         NemoActionManager   *manager);
+
 static void
-setup_custom_actions_page (GtkBuilder *builder)
+on_edit_action_clicked (GtkButton *button,
+                        gpointer   user_data)
+{
+    const char *id = user_data;
+    g_autoptr (NemoActionManager) manager = nemo_action_manager_dup_singleton ();
+    NemoAction *action = nemo_action_manager_get_action (manager, id);
+    GtkRoot *root = gtk_widget_get_root (GTK_WIDGET (button));
+
+    if (action == NULL || !GTK_IS_WIDGET (root))
+    {
+        return;
+    }
+    nemo_action_editor_present (action,
+                                nemo_action_manager_get_actions_dir (manager),
+                                GTK_WIDGET (root));
+}
+
+static void
+on_delete_response (AdwAlertDialog *dialog,
+                    GAsyncResult   *result,
+                    gpointer        user_data)
+{
+    g_autofree char *id = user_data;
+    const char *response = adw_alert_dialog_choose_finish (dialog, result);
+
+    if (g_strcmp0 (response, "delete") == 0)
+    {
+        g_autoptr (NemoActionManager) manager = nemo_action_manager_dup_singleton ();
+        g_autoptr (GError) error = NULL;
+
+        if (!nemo_action_manager_delete_action (manager, id, &error))
+        {
+            g_warning ("Could not delete action “%s”: %s", id, error->message);
+        }
+    }
+}
+
+static void
+on_delete_action_clicked (GtkButton *button,
+                          gpointer   user_data)
+{
+    const char *id = user_data;
+    GtkRoot *root = gtk_widget_get_root (GTK_WIDGET (button));
+    AdwAlertDialog *dialog;
+
+    if (!GTK_IS_WIDGET (root))
+    {
+        return;
+    }
+
+    dialog = ADW_ALERT_DIALOG (adw_alert_dialog_new (_("Delete action?"),
+        _("The corresponding .nemo_action file will be removed permanently.")));
+    adw_alert_dialog_add_responses (dialog,
+                                    "cancel", _("_Cancel"),
+                                    "delete", _("_Delete"),
+                                    NULL);
+    adw_alert_dialog_set_response_appearance (dialog, "delete",
+                                              ADW_RESPONSE_DESTRUCTIVE);
+    adw_alert_dialog_set_default_response (dialog, "cancel");
+    adw_alert_dialog_set_close_response (dialog, "cancel");
+
+    adw_alert_dialog_choose (dialog, GTK_WIDGET (root), NULL,
+                             (GAsyncReadyCallback) on_delete_response,
+                             g_strdup (id));
+}
+
+static void
+on_add_action_clicked (GtkButton *button,
+                       gpointer   user_data)
 {
     g_autoptr (NemoActionManager) manager = nemo_action_manager_dup_singleton ();
-    AdwPreferencesGroup *group;
-    GList *actions;
-    const char *last_group = "";
+    GtkRoot *root = gtk_widget_get_root (GTK_WIDGET (button));
 
-    group = ADW_PREFERENCES_GROUP (gtk_builder_get_object (builder,
-                                                           "custom_actions_group"));
+    if (!GTK_IS_WIDGET (root))
+    {
+        return;
+    }
+    nemo_action_editor_present (NULL,
+                                nemo_action_manager_get_actions_dir (manager),
+                                GTK_WIDGET (root));
+}
+
+static void
+on_manager_changed (NemoActionManager   *manager,
+                    AdwPreferencesGroup *group)
+{
+    rebuild_custom_actions_rows (group, manager);
+}
+
+static GtkWidget *
+make_suffix_button (const char  *icon_name,
+                    const char  *tooltip,
+                    GCallback    handler,
+                    const char  *action_id)
+{
+    GtkWidget *button = gtk_button_new_from_icon_name (icon_name);
+
+    gtk_widget_set_tooltip_text (button, tooltip);
+    gtk_widget_set_valign (button, GTK_ALIGN_CENTER);
+    gtk_widget_add_css_class (button, "flat");
+    g_signal_connect_data (button, "clicked", handler,
+                           g_strdup (action_id),
+                           (GClosureNotify) g_free, 0);
+
+    return button;
+}
+
+static void
+rebuild_custom_actions_rows (AdwPreferencesGroup *group,
+                             NemoActionManager   *manager)
+{
+    GList *previous;
+    GList *actions;
+    GList *current = NULL;
+    const char *last_group = NULL;
+
+    /* Drop the rows we added last time. The group's title + description and
+     * the header-suffix Add button are not in this list, so they stay. */
+    previous = g_object_get_data (G_OBJECT (group), ROWS_KEY);
+    for (GList *l = previous; l != NULL; l = l->next)
+    {
+        adw_preferences_group_remove (group, GTK_WIDGET (l->data));
+    }
+    g_list_free (previous);
+    g_object_set_data (G_OBJECT (group), ROWS_KEY, NULL);
+
     actions = nemo_action_manager_get_actions (manager);
 
     if (actions == NULL)
@@ -190,8 +315,10 @@ setup_custom_actions_page (GtkBuilder *builder)
         adw_preferences_row_set_title (ADW_PREFERENCES_ROW (empty),
                                        _("No custom actions yet"));
         adw_action_row_set_subtitle (empty,
-                                     _("Drop a .nemo_action file into ~/.local/share/nemo/actions/ to add an entry to the right-click menu."));
+            _("Click the + button to create one, or drop a .nemo_action file into ~/.local/share/nemo/actions/."));
         adw_preferences_group_add (group, GTK_WIDGET (empty));
+        current = g_list_prepend (current, empty);
+        g_object_set_data (G_OBJECT (group), ROWS_KEY, current);
         return;
     }
 
@@ -202,6 +329,7 @@ setup_custom_actions_page (GtkBuilder *builder)
         const char *comment = nemo_action_get_comment (action);
         const char *icon = nemo_action_get_icon_name (action);
         const char *group_name = nemo_action_get_group (action);
+        const char *id = nemo_action_get_id (action);
         AdwActionRow *row;
 
         if (group_name == NULL)
@@ -210,9 +338,6 @@ setup_custom_actions_page (GtkBuilder *builder)
         }
         if (g_strcmp0 (group_name, last_group) != 0)
         {
-            /* Section break between groups: a small header row makes the
-             * grouping visible without spawning a whole PreferencesGroup
-             * per group. */
             AdwActionRow *header = ADW_ACTION_ROW (adw_action_row_new ());
             g_autofree char *title = g_strdup_printf ("— %s —",
                                                       *group_name != '\0' ?
@@ -221,6 +346,7 @@ setup_custom_actions_page (GtkBuilder *builder)
             adw_preferences_row_set_title (ADW_PREFERENCES_ROW (header), title);
             gtk_widget_set_sensitive (GTK_WIDGET (header), FALSE);
             adw_preferences_group_add (group, GTK_WIDGET (header));
+            current = g_list_prepend (current, header);
             last_group = group_name;
         }
 
@@ -234,8 +360,52 @@ setup_custom_actions_page (GtkBuilder *builder)
         {
             adw_action_row_add_prefix (row, gtk_image_new_from_icon_name (icon));
         }
+
+        adw_action_row_add_suffix (row,
+            make_suffix_button ("document-edit-symbolic", _("Edit"),
+                                G_CALLBACK (on_edit_action_clicked), id));
+        adw_action_row_add_suffix (row,
+            make_suffix_button ("user-trash-symbolic", _("Delete"),
+                                G_CALLBACK (on_delete_action_clicked), id));
+
         adw_preferences_group_add (group, GTK_WIDGET (row));
+        current = g_list_prepend (current, row);
     }
+
+    g_object_set_data (G_OBJECT (group), ROWS_KEY, current);
+}
+
+/* Set up the "Custom Actions" preferences page: an Add button in the group
+ * header, one editable row per loaded .nemo_action, and a live reload hooked
+ * to the action manager so external edits (and the editor's saves/deletes)
+ * appear without reopening the dialog. */
+static void
+setup_custom_actions_page (GtkBuilder *builder)
+{
+    NemoActionManager *manager = nemo_action_manager_dup_singleton ();
+    AdwPreferencesGroup *group;
+    GtkWidget *add_button;
+
+    group = ADW_PREFERENCES_GROUP (gtk_builder_get_object (builder,
+                                                           "custom_actions_group"));
+
+    /* Tie the manager's lifetime to the group so the signal stays valid as
+     * long as the dialog is open, but is released when it closes. */
+    g_object_set_data_full (G_OBJECT (group), MANAGER_KEY, manager,
+                            g_object_unref);
+
+    add_button = gtk_button_new_from_icon_name ("list-add-symbolic");
+    gtk_widget_set_tooltip_text (add_button, _("Add an action"));
+    gtk_widget_add_css_class (add_button, "flat");
+    g_signal_connect (add_button, "clicked",
+                      G_CALLBACK (on_add_action_clicked), NULL);
+    adw_preferences_group_set_header_suffix (group, add_button);
+
+    rebuild_custom_actions_rows (group, manager);
+
+    g_signal_connect_object (manager, "changed",
+                             G_CALLBACK (on_manager_changed), group,
+                             G_CONNECT_DEFAULT);
 }
 
 static void

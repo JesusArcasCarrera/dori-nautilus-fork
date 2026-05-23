@@ -27,6 +27,17 @@ GList             *nemo_action_manager_get_actions   (NemoActionManager *self);
 NemoAction        *nemo_action_manager_get_action    (NemoActionManager *self,
                                                       const char        *id);
 
+/* The folder where the manager looks for .nemo_action files. The returned
+ * GFile is owned by the manager; don't free. */
+GFile             *nemo_action_manager_get_actions_dir (NemoActionManager *self);
+
+/* Remove an action by id (the .nemo_action filename). Returns TRUE on success;
+ * on failure, error is set. The "changed" signal fires asynchronously when
+ * the file monitor notices the deletion. */
+gboolean           nemo_action_manager_delete_action   (NemoActionManager *self,
+                                                        const char        *id,
+                                                        GError           **error);
+
 /* Emits "changed" whenever the actions on disk are added, removed or edited. */
 
 G_END_DECLS

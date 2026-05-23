@@ -240,6 +240,45 @@ nemo_action_get_position (NemoAction *self)
     return self->position;
 }
 
+const char *
+nemo_action_get_exec (NemoAction *self)
+{
+    return self->exec;
+}
+
+const char *
+nemo_action_get_type_string (NemoAction *self)
+{
+    switch (self->type)
+    {
+        case NEMO_ACTION_TYPE_CREATE_FROM_CLIPBOARD:
+            return "create-from-clipboard";
+        case NEMO_ACTION_TYPE_OVERWRITE_FROM_CLIPBOARD:
+            return "overwrite-from-clipboard";
+        case NEMO_ACTION_TYPE_COMMAND:
+        default:
+            return "command";
+    }
+}
+
+const char *
+nemo_action_get_selection_string (NemoAction *self)
+{
+    switch (self->selection_kind)
+    {
+        case SELECTION_NONE:
+            return "None";
+        case SELECTION_SINGLE:
+            return "Single";
+        case SELECTION_MULTIPLE:
+            return "Multiple";
+        case SELECTION_COUNT:
+        case SELECTION_ANY:
+        default:
+            return "Any";
+    }
+}
+
 static gboolean
 file_matches_extensions (NautilusFile *file,
                          GStrv         extensions)

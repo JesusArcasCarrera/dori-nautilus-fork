@@ -25,6 +25,12 @@ const char  *nemo_action_get_comment   (NemoAction *self);
 const char  *nemo_action_get_icon_name (NemoAction *self);
 const char  *nemo_action_get_group     (NemoAction *self);
 int          nemo_action_get_position  (NemoAction *self);
+const char  *nemo_action_get_exec      (NemoAction *self);
+
+/* Round-trip strings used in the .nemo_action file format. Useful to pre-fill
+ * an editor without re-parsing the file. */
+const char  *nemo_action_get_type_string      (NemoAction *self);
+const char  *nemo_action_get_selection_string (NemoAction *self);
 
 /* Whether the action should be shown for the given selection (a GList of
  * NautilusFile). An empty selection is the background-menu case. */

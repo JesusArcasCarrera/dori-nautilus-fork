@@ -11,6 +11,7 @@ libnautilus_sources = [
     ]
   ),
   'nemo-action.c',
+  'nemo-action-editor.c',
   'nemo-action-manager.c',
   resources,
   gnome.gdbus_codegen(
