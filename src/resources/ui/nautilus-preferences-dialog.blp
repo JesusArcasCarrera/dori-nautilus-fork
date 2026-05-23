@@ -24,6 +24,12 @@ Adw.PreferencesDialog preferences_dialog {
         title: _("_Action to Open Items");
         use-underline: true;
       }
+
+      Adw.ComboRow type_to_action_row {
+        title: _("When you _Start Typing");
+        subtitle: _("Choose what plain typing does in a folder view. Ctrl+F and the search button always start a search.");
+        use-underline: true;
+      }
     }
 
     Adw.PreferencesGroup {

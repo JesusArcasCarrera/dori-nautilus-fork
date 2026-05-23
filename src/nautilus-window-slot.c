@@ -577,21 +577,61 @@ nautilus_window_slot_handle_activate_files (NautilusWindowSlot *self,
 
 #define TYPEAHEAD_RESET_MSEC 1000
 
-static void
-apply_filter_text (NautilusWindowSlot *self)
+static NautilusListBase *
+get_active_list_base (NautilusWindowSlot *self)
 {
-    NautilusListBase *list_base;
-
     if (self->content_view == NULL)
+    {
+        return NULL;
+    }
+    return nautilus_files_view_get_private_list_base (self->content_view);
+}
+
+/* Show (or hide) the typeahead text in the slot's existing top banner.
+ * Hiding restores whatever location banner the current folder normally
+ * shows, so the user doesn't lose location-specific warnings. */
+static void
+update_typeahead_indicator (NautilusWindowSlot *self,
+                            const char         *typed,
+                            const char         *label_prefix)
+{
+    g_autofree char *full = NULL;
+
+    if (self->banner == NULL)
     {
         return;
     }
 
-    list_base = nautilus_files_view_get_private_list_base (self->content_view);
+    if (typed == NULL || *typed == '\0')
+    {
+        if (self->location != NULL)
+        {
+            nautilus_location_banner_load (self->banner, self->location);
+        }
+        else
+        {
+            adw_banner_set_revealed (self->banner, FALSE);
+        }
+        return;
+    }
+
+    full = g_strdup_printf ("%s%s", label_prefix, typed);
+    adw_banner_set_title (self->banner, full);
+    adw_banner_set_button_label (self->banner, NULL);
+    adw_banner_set_revealed (self->banner, TRUE);
+}
+
+static void
+apply_filter_text (NautilusWindowSlot *self)
+{
+    NautilusListBase *list_base = get_active_list_base (self);
+
     if (list_base != NULL)
     {
         nautilus_list_base_set_filter_text (list_base, self->filter_text);
     }
+
+    update_typeahead_indicator (self, self->filter_text, "Filter: ");
 }
 
 static void
@@ -647,6 +687,7 @@ locate_timeout_cb (gpointer data)
 
     self->locate_timeout_id = 0;
     g_clear_pointer (&self->locate_prefix, g_free);
+    update_typeahead_indicator (self, NULL, NULL);
 
     return G_SOURCE_REMOVE;
 }
@@ -656,6 +697,7 @@ clear_locate (NautilusWindowSlot *self)
 {
     g_clear_handle_id (&self->locate_timeout_id, g_source_remove);
     g_clear_pointer (&self->locate_prefix, g_free);
+    update_typeahead_indicator (self, NULL, NULL);
 }
 
 static void
@@ -674,16 +716,13 @@ append_locate_char (NautilusWindowSlot *self,
     self->locate_timeout_id = g_timeout_add (TYPEAHEAD_RESET_MSEC,
                                              locate_timeout_cb, self);
 
-    if (self->content_view == NULL)
-    {
-        return;
-    }
-
-    list_base = nautilus_files_view_get_private_list_base (self->content_view);
+    list_base = get_active_list_base (self);
     if (list_base != NULL)
     {
         nautilus_list_base_typeahead_select (list_base, self->locate_prefix);
     }
+
+    update_typeahead_indicator (self, self->locate_prefix, "Locate: ");
 }
 
 gboolean

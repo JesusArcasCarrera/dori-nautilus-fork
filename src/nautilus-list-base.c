@@ -1419,8 +1419,7 @@ filter_text_match_cb (gpointer item,
                       gpointer user_data)
 {
     const char *needle = user_data;
-    GtkTreeListRow *row;
-    g_autoptr (NautilusViewItem) view_item = NULL;
+    NautilusViewItem *view_item;
     NautilusFile *file;
     const char *name;
     g_autofree char *name_folded = NULL;
@@ -1431,12 +1430,9 @@ filter_text_match_cb (gpointer item,
         return TRUE;
     }
 
-    row = GTK_TREE_LIST_ROW (item);
-    view_item = NAUTILUS_VIEW_ITEM (gtk_tree_list_row_get_item (row));
-    if (view_item == NULL)
-    {
-        return TRUE;
-    }
+    /* The filter sits on the root model whose items are NautilusViewItem
+     * directly, not wrapped in GtkTreeListRow yet. */
+    view_item = NAUTILUS_VIEW_ITEM (item);
 
     file = nautilus_view_item_get_file (view_item);
     if (file == NULL)
@@ -1453,7 +1449,10 @@ filter_text_match_cb (gpointer item,
     name_folded = g_utf8_casefold (name, -1);
     needle_folded = g_utf8_casefold (needle, -1);
 
-    return g_strstr_len (name_folded, -1, needle_folded) != NULL;
+    /* Prefix match: typing "c" shows files starting with C, not every file
+     * that happens to contain a C anywhere. This stays consistent with how
+     * the "locate" mode interprets the same typed string. */
+    return g_str_has_prefix (name_folded, needle_folded);
 }
 
 void

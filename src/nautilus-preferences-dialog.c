@@ -52,6 +52,8 @@
         "thumbnails_row"
 #define NAUTILUS_PREFERENCES_DIALOG_COUNT_ROW                       \
         "count_row"
+#define NAUTILUS_PREFERENCES_DIALOG_TYPE_TO_ACTION_ROW                         \
+        "type_to_action_row"
 
 static const char * const speed_tradeoff_values[] =
 {
@@ -60,6 +62,12 @@ static const char * const speed_tradeoff_values[] =
 };
 
 static const char * const click_behavior_values[] = {"single", "double", NULL};
+
+static const char * const type_to_action_values[] =
+{
+    "filter", "locate", "search", "none",
+    NULL
+};
 
 static void
 bind_builder_bool (GtkBuilder *builder,
@@ -170,6 +178,14 @@ nautilus_preferences_dialog_setup (GtkBuilder *builder)
                  (const char *[]) { _("On This Device Only"), _("All Files"), _("Never"), NULL });
     setup_combo (builder, NAUTILUS_PREFERENCES_DIALOG_COUNT_ROW,
                  (const char *[]) { _("On This Device Only"), _("All Folders"), _("Never"), NULL });
+    setup_combo (builder, NAUTILUS_PREFERENCES_DIALOG_TYPE_TO_ACTION_ROW,
+                 (const char *[]) {
+                     _("Filter This Folder"),
+                     _("Jump to First Match"),
+                     _("Search Recursively"),
+                     _("Do Nothing"),
+                     NULL,
+                 });
 
     /* setup preferences */
     bind_builder_bool (builder, gtk_filechooser_preferences,
@@ -203,6 +219,10 @@ nautilus_preferences_dialog_setup (GtkBuilder *builder)
                             NAUTILUS_PREFERENCES_DIALOG_COUNT_ROW,
                             NAUTILUS_PREFERENCES_SHOW_DIRECTORY_ITEM_COUNTS,
                             (const char **) speed_tradeoff_values);
+    bind_builder_combo_row (builder, nautilus_preferences,
+                            NAUTILUS_PREFERENCES_DIALOG_TYPE_TO_ACTION_ROW,
+                            NAUTILUS_PREFERENCES_TYPE_TO_ACTION,
+                            (const char **) type_to_action_values);
 }
 
 void
