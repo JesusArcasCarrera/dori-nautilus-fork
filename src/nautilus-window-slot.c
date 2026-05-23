@@ -31,6 +31,8 @@
 #include "nautilus-enum-types.h"
 #include "nautilus-fd-holder.h"
 #include "nautilus-files-view.h"
+#include "nautilus-global-preferences.h"
+#include "nautilus-list-base.h"
 #include "nautilus-location-banner.h"
 #include "nautilus-mime-actions.h"
 #include "nautilus-query.h"
@@ -125,6 +127,13 @@ struct _NautilusWindowSlot
     /* Query editor */
     NautilusQueryEditor *query_editor;
     NautilusQuery *pending_search_query;
+
+    /* Type-to-action state (filter or typeahead-locate). Both modes accumulate
+     * a string of typed characters; locate also resets it after a short
+     * inactivity timeout so the next typing starts a new prefix. */
+    char *filter_text;
+    char *locate_prefix;
+    guint locate_timeout_id;
 
     /* Banner */
     AdwBanner *banner;
@@ -566,25 +575,151 @@ nautilus_window_slot_handle_activate_files (NautilusWindowSlot *self,
     return TRUE;
 }
 
+#define TYPEAHEAD_RESET_MSEC 1000
+
+static void
+apply_filter_text (NautilusWindowSlot *self)
+{
+    NautilusListBase *list_base;
+
+    if (self->content_view == NULL)
+    {
+        return;
+    }
+
+    list_base = nautilus_files_view_get_private_list_base (self->content_view);
+    if (list_base != NULL)
+    {
+        nautilus_list_base_set_filter_text (list_base, self->filter_text);
+    }
+}
+
+static void
+clear_filter (NautilusWindowSlot *self)
+{
+    g_clear_pointer (&self->filter_text, g_free);
+    apply_filter_text (self);
+}
+
+static void
+append_filter_char (NautilusWindowSlot *self,
+                    const char         *utf8)
+{
+    char *new_text;
+
+    new_text = g_strconcat (self->filter_text != NULL ? self->filter_text : "",
+                            utf8, NULL);
+    g_free (self->filter_text);
+    self->filter_text = new_text;
+    apply_filter_text (self);
+}
+
+static void
+pop_filter_char (NautilusWindowSlot *self)
+{
+    char *end;
+    char *prev;
+
+    if (self->filter_text == NULL || *self->filter_text == '\0')
+    {
+        clear_filter (self);
+        return;
+    }
+
+    end = self->filter_text + strlen (self->filter_text);
+    prev = g_utf8_prev_char (end);
+    *prev = '\0';
+
+    if (*self->filter_text == '\0')
+    {
+        clear_filter (self);
+    }
+    else
+    {
+        apply_filter_text (self);
+    }
+}
+
+static gboolean
+locate_timeout_cb (gpointer data)
+{
+    NautilusWindowSlot *self = data;
+
+    self->locate_timeout_id = 0;
+    g_clear_pointer (&self->locate_prefix, g_free);
+
+    return G_SOURCE_REMOVE;
+}
+
+static void
+clear_locate (NautilusWindowSlot *self)
+{
+    g_clear_handle_id (&self->locate_timeout_id, g_source_remove);
+    g_clear_pointer (&self->locate_prefix, g_free);
+}
+
+static void
+append_locate_char (NautilusWindowSlot *self,
+                    const char         *utf8)
+{
+    NautilusListBase *list_base;
+    char *new_prefix;
+
+    new_prefix = g_strconcat (self->locate_prefix != NULL ? self->locate_prefix : "",
+                              utf8, NULL);
+    g_free (self->locate_prefix);
+    self->locate_prefix = new_prefix;
+
+    g_clear_handle_id (&self->locate_timeout_id, g_source_remove);
+    self->locate_timeout_id = g_timeout_add (TYPEAHEAD_RESET_MSEC,
+                                             locate_timeout_cb, self);
+
+    if (self->content_view == NULL)
+    {
+        return;
+    }
+
+    list_base = nautilus_files_view_get_private_list_base (self->content_view);
+    if (list_base != NULL)
+    {
+        nautilus_list_base_typeahead_select (list_base, self->locate_prefix);
+    }
+}
+
 gboolean
 nautilus_window_slot_handle_event (NautilusWindowSlot    *self,
                                    GtkEventControllerKey *controller,
                                    guint                  keyval,
                                    GdkModifierType        state)
 {
-    gboolean retval;
-    GAction *action;
+    NautilusTypeToAction mode;
+    GAction *search_visible;
+    gunichar character;
+    char utf8[8];
+    gint utf8_len;
 
-    retval = FALSE;
-    action = g_action_map_lookup_action (G_ACTION_MAP (self->slot_action_group),
-                                         "search-visible");
-
-    if (keyval == GDK_KEY_Escape ||
-        keyval == GDK_KEY_BackSpace)
+    /* Escape/Backspace tear down an active filter or locate session first, so
+     * the user always has a way out regardless of what else is going on. */
+    if (keyval == GDK_KEY_Escape &&
+        (self->filter_text != NULL || self->locate_prefix != NULL))
     {
-        g_autoptr (GVariant) action_state = NULL;
+        clear_filter (self);
+        clear_locate (self);
+        return GDK_EVENT_STOP;
+    }
+    if (keyval == GDK_KEY_BackSpace && self->filter_text != NULL)
+    {
+        pop_filter_char (self);
+        return GDK_EVENT_STOP;
+    }
 
-        action_state = g_action_get_state (action);
+    search_visible = g_action_map_lookup_action (G_ACTION_MAP (self->slot_action_group),
+                                                 "search-visible");
+
+    /* Pre-existing search Escape/Backspace handling. */
+    if (keyval == GDK_KEY_Escape || keyval == GDK_KEY_BackSpace)
+    {
+        g_autoptr (GVariant) action_state = g_action_get_state (search_visible);
 
         if (!g_variant_get_boolean (action_state))
         {
@@ -597,21 +732,55 @@ nautilus_window_slot_handle_event (NautilusWindowSlot    *self,
         }
     }
 
-    /* If the action is not enabled, don't try to handle search */
-    if (g_action_get_enabled (action))
+    mode = (NautilusTypeToAction) g_settings_get_enum (nautilus_preferences,
+                                                       NAUTILUS_PREFERENCES_TYPE_TO_ACTION);
+    if (mode == NAUTILUS_TYPE_TO_ACTION_NONE)
     {
-        retval = nautilus_query_editor_handle_event (self->query_editor,
-                                                     controller,
-                                                     keyval,
-                                                     state);
+        return GDK_EVENT_PROPAGATE;
     }
 
-    if (retval)
+    /* Never intercept keyboard shortcuts. */
+    if ((state & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_SUPER_MASK | GDK_META_MASK)) != 0)
     {
-        nautilus_window_slot_set_search_visible (self, TRUE);
+        return GDK_EVENT_PROPAGATE;
     }
 
-    return retval;
+    if (mode == NAUTILUS_TYPE_TO_ACTION_SEARCH)
+    {
+        gboolean retval = FALSE;
+
+        if (g_action_get_enabled (search_visible))
+        {
+            retval = nautilus_query_editor_handle_event (self->query_editor,
+                                                         controller, keyval, state);
+        }
+        if (retval)
+        {
+            nautilus_window_slot_set_search_visible (self, TRUE);
+        }
+        return retval;
+    }
+
+    /* Filter or locate: only printable characters are consumed. */
+    character = gdk_keyval_to_unicode (keyval);
+    if (character == 0 || !g_unichar_isprint (character))
+    {
+        return GDK_EVENT_PROPAGATE;
+    }
+
+    utf8_len = g_unichar_to_utf8 (character, utf8);
+    utf8[utf8_len] = '\0';
+
+    if (mode == NAUTILUS_TYPE_TO_ACTION_FILTER)
+    {
+        append_filter_char (self, utf8);
+    }
+    else /* NAUTILUS_TYPE_TO_ACTION_LOCATE */
+    {
+        append_locate_char (self, utf8);
+    }
+
+    return GDK_EVENT_STOP;
 }
 
 static void
@@ -2800,6 +2969,9 @@ nautilus_window_slot_finalize (GObject *object)
     NautilusWindowSlot *self;
     self = NAUTILUS_WINDOW_SLOT (object);
     g_clear_pointer (&self->title, g_free);
+    g_clear_pointer (&self->filter_text, g_free);
+    g_clear_pointer (&self->locate_prefix, g_free);
+    g_clear_handle_id (&self->locate_timeout_id, g_source_remove);
 
     G_OBJECT_CLASS (nautilus_window_slot_parent_class)->finalize (object);
 }

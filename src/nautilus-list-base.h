@@ -74,4 +74,14 @@ void    nautilus_list_base_set_zoom_level          (NautilusListBase  *self,
 void    nautilus_list_base_setup_directory         (NautilusListBase  *self,
                                                     NautilusDirectory *directory);
 
+/* Apply a substring filter to the items shown in the current folder. Passing
+ * NULL or "" clears the filter. Case-insensitive. */
+void    nautilus_list_base_set_filter_text         (NautilusListBase  *self,
+                                                    const char        *text);
+
+/* Typeahead-select: scroll to and select the first item whose display name
+ * starts with the given prefix (case-insensitive). Returns TRUE on a match. */
+gboolean nautilus_list_base_typeahead_select       (NautilusListBase  *self,
+                                                    const char        *prefix);
+
 G_END_DECLS

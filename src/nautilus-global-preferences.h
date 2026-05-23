@@ -115,6 +115,17 @@ typedef enum
 /* Search behaviour */
 #define NAUTILUS_PREFERENCES_RECURSIVE_SEARCH "recursive-search"
 
+/* What happens when the user starts typing in a folder view. */
+#define NAUTILUS_PREFERENCES_TYPE_TO_ACTION "type-to-action"
+
+typedef enum
+{
+    NAUTILUS_TYPE_TO_ACTION_FILTER = 0,
+    NAUTILUS_TYPE_TO_ACTION_LOCATE = 1,
+    NAUTILUS_TYPE_TO_ACTION_SEARCH = 2,
+    NAUTILUS_TYPE_TO_ACTION_NONE   = 3,
+} NautilusTypeToAction;
+
 /* Context menu options */
 #define NAUTILUS_PREFERENCES_SHOW_DELETE_PERMANENTLY "show-delete-permanently"
 #define NAUTILUS_PREFERENCES_SHOW_CREATE_LINK "show-create-link"

@@ -1413,3 +1413,137 @@ nautilus_list_base_setup_directory (NautilusListBase  *self,
 {
     NAUTILUS_LIST_BASE_CLASS (G_OBJECT_GET_CLASS (self))->setup_directory (self, directory);
 }
+
+static gboolean
+filter_text_match_cb (gpointer item,
+                      gpointer user_data)
+{
+    const char *needle = user_data;
+    GtkTreeListRow *row;
+    g_autoptr (NautilusViewItem) view_item = NULL;
+    NautilusFile *file;
+    const char *name;
+    g_autofree char *name_folded = NULL;
+    g_autofree char *needle_folded = NULL;
+
+    if (needle == NULL || *needle == '\0')
+    {
+        return TRUE;
+    }
+
+    row = GTK_TREE_LIST_ROW (item);
+    view_item = NAUTILUS_VIEW_ITEM (gtk_tree_list_row_get_item (row));
+    if (view_item == NULL)
+    {
+        return TRUE;
+    }
+
+    file = nautilus_view_item_get_file (view_item);
+    if (file == NULL)
+    {
+        return TRUE;
+    }
+
+    name = nautilus_file_get_display_name (file);
+    if (name == NULL)
+    {
+        return TRUE;
+    }
+
+    name_folded = g_utf8_casefold (name, -1);
+    needle_folded = g_utf8_casefold (needle, -1);
+
+    return g_strstr_len (name_folded, -1, needle_folded) != NULL;
+}
+
+void
+nautilus_list_base_set_filter_text (NautilusListBase *self,
+                                    const char       *text)
+{
+    NautilusViewModel *model;
+    g_autoptr (GtkCustomFilter) filter = NULL;
+
+    g_return_if_fail (NAUTILUS_IS_LIST_BASE (self));
+
+    model = nautilus_list_base_get_model (self);
+    if (model == NULL)
+    {
+        return;
+    }
+
+    if (text == NULL || *text == '\0')
+    {
+        nautilus_view_model_set_filter (model, NULL);
+        return;
+    }
+
+    filter = gtk_custom_filter_new (filter_text_match_cb,
+                                    g_strdup (text), g_free);
+    nautilus_view_model_set_filter (model, GTK_FILTER (filter));
+}
+
+gboolean
+nautilus_list_base_typeahead_select (NautilusListBase *self,
+                                     const char       *prefix)
+{
+    NautilusViewModel *model;
+    g_autofree char *prefix_folded = NULL;
+    guint n_items;
+
+    g_return_val_if_fail (NAUTILUS_IS_LIST_BASE (self), FALSE);
+
+    if (prefix == NULL || *prefix == '\0')
+    {
+        return FALSE;
+    }
+
+    model = nautilus_list_base_get_model (self);
+    if (model == NULL)
+    {
+        return FALSE;
+    }
+
+    prefix_folded = g_utf8_casefold (prefix, -1);
+    n_items = g_list_model_get_n_items (G_LIST_MODEL (model));
+
+    for (guint i = 0; i < n_items; i++)
+    {
+        g_autoptr (GtkTreeListRow) row = g_list_model_get_item (G_LIST_MODEL (model), i);
+        g_autoptr (NautilusViewItem) view_item = NULL;
+        NautilusFile *file;
+        const char *name;
+        g_autofree char *name_folded = NULL;
+
+        if (row == NULL)
+        {
+            continue;
+        }
+
+        view_item = NAUTILUS_VIEW_ITEM (gtk_tree_list_row_get_item (row));
+        if (view_item == NULL)
+        {
+            continue;
+        }
+
+        file = nautilus_view_item_get_file (view_item);
+        if (file == NULL)
+        {
+            continue;
+        }
+
+        name = nautilus_file_get_display_name (file);
+        if (name == NULL)
+        {
+            continue;
+        }
+
+        name_folded = g_utf8_casefold (name, -1);
+        if (g_str_has_prefix (name_folded, prefix_folded))
+        {
+            nautilus_list_base_set_cursor (self, i, TRUE, TRUE);
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}

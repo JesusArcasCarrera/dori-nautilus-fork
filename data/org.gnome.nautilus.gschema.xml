@@ -61,6 +61,13 @@
     <value value="2" nick="created"/>
   </enum>
 
+  <enum id="org.gnome.nautilus.TypeToAction">
+    <value value="0" nick="filter"/>
+    <value value="1" nick="locate"/>
+    <value value="2" nick="search"/>
+    <value value="3" nick="none"/>
+  </enum>
+
   <enum id="org.gnome.nautilus.CompressionFormat">
     <value value="0" nick="zip"/>
     <value value="1" nick="tar.xz"/>
@@ -86,6 +93,11 @@
       <default>'local-only'</default>
       <summary>Where to perform recursive search</summary>
       <description>Locations in which Files should search subfolders. Available values are “local-only”, “always”, “never”.</description>
+    </key>
+    <key name="type-to-action" enum="org.gnome.nautilus.TypeToAction">
+      <default>'filter'</default>
+      <summary>What happens when you start typing in a folder view</summary>
+      <description>Choose how typing in a folder is interpreted. "filter" hides items that don't match in the current folder. "locate" jumps to the first item whose name starts with the typed prefix. "search" runs a recursive search like GNOME Files (subject to "recursive-search"). "none" disables type-to-action entirely; use the search button or Ctrl+F to start a search explicitly.</description>
     </key>
     <key name="search-filter-time-type" enum="org.gnome.nautilus.SearchFilterTimeType">
       <default>'last_modified'</default>
