@@ -1149,10 +1149,19 @@ nautilus_window_initialize_actions (NautilusWindow *window)
 
     /* The toggle-sidebar action stays always enabled so the sidebar can be
      * hidden in the desktop layout too, not only in the collapsed one.
-     * Restore the visibility persisted from a previous session. */
-    adw_overlay_split_view_set_show_sidebar (
-        ADW_OVERLAY_SPLIT_VIEW (window->split_view),
-        g_settings_get_boolean (nautilus_window_state, "sidebar-visible"));
+     * Restore the persisted visibility only when we're actually in the
+     * desktop layout — in the narrow (collapsed) layout the sidebar is a
+     * transient overlay whose visibility is owned by the user's gesture. */
+    {
+        AdwOverlaySplitView *split = ADW_OVERLAY_SPLIT_VIEW (window->split_view);
+
+        if (!adw_overlay_split_view_get_collapsed (split))
+        {
+            adw_overlay_split_view_set_show_sidebar (
+                split,
+                g_settings_get_boolean (nautilus_window_state, "sidebar-visible"));
+        }
+    }
 }
 
 static gboolean

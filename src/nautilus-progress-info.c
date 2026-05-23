@@ -680,6 +680,14 @@ nautilus_progress_info_set_user_paused (NautilusProgressInfo *info,
     {
         nautilus_progress_info_resume (info);
     }
+
+    /* Notify any widget that displays this info so its pause/resume button
+     * (and anything else derived) can refresh. The "changed" signal is
+     * delivered from the main loop and is what widgets already listen to. */
+    G_LOCK (progress_info);
+    info->changed_at_idle = TRUE;
+    queue_idle (info, TRUE);
+    G_UNLOCK (progress_info);
 }
 
 /* Called from the worker thread. Blocks while the operation is user-paused,

@@ -6816,16 +6816,13 @@ action_remove_recent_server (GSimpleAction *action,
 static GFile *
 get_current_location (NautilusFilesView *self)
 {
-    g_autofree char *uri = NULL;
-
     if (self->directory == NULL)
     {
         return NULL;
     }
 
-    uri = nautilus_directory_get_uri (self->directory);
-
-    return (uri != NULL) ? g_file_new_for_uri (uri) : NULL;
+    /* Direct accessor: no string round-trip, no URI parsing pitfalls. */
+    return nautilus_directory_get_location (self->directory);
 }
 
 static void

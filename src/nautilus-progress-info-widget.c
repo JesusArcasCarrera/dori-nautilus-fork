@@ -181,6 +181,12 @@ nautilus_progress_info_widget_constructed (GObject *obj)
     g_signal_connect_swapped (self->priv->info,
                               "changed",
                               G_CALLBACK (update_data), self);
+    /* Keep the pause/resume button in sync when another widget instance
+     * (e.g. the same info shown in both the popover and the operations
+     * window) toggles the paused state. */
+    g_signal_connect_swapped (self->priv->info,
+                              "changed",
+                              G_CALLBACK (update_pause_button), self);
     g_signal_connect_swapped (self->priv->info,
                               "progress-changed",
                               G_CALLBACK (update_progress), self);

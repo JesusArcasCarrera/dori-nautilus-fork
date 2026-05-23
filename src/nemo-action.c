@@ -582,12 +582,14 @@ on_clipboard_text (GObject      *source,
     }
     else
     {
-        /* Create a new, uniquely-named text file holding the clipboard text. */
+        /* Create a new, uniquely-named text file holding the clipboard text.
+         * The base name is intentionally NOT translatable: file names should
+         * not depend on the user's current locale. */
         for (int i = 1; i < 1000; i++)
         {
             g_autofree char *name = (i == 1) ?
-                g_strdup (_("Pasted Text.txt")) :
-                g_strdup_printf (_("Pasted Text %d.txt"), i);
+                g_strdup ("Pasted Text.txt") :
+                g_strdup_printf ("Pasted Text %d.txt", i);
             g_autoptr (GFile) child = g_file_get_child (data->target, name);
             g_autoptr (GFileOutputStream) stream =
                 g_file_create (child, G_FILE_CREATE_NONE, NULL, &error);

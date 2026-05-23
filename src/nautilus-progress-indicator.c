@@ -598,6 +598,16 @@ nautilus_progress_indicator_dispose (GObject *obj)
 {
     NautilusProgressIndicator *self = NAUTILUS_PROGRESS_INDICATOR (obj);
 
+    /* If a surface was still open (popover or window), drop our viewer
+     * count first so the manager doesn't hold a phantom viewer for an
+     * object that's being torn down. */
+    if (self->is_viewer && self->progress_manager != NULL)
+    {
+        nautilus_progress_manager_remove_viewer (self->progress_manager,
+                                                 G_OBJECT (self));
+        self->is_viewer = FALSE;
+    }
+
     if (self->operations_window != NULL)
     {
         g_signal_handlers_disconnect_by_data (self->operations_window, self);

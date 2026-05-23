@@ -9,6 +9,7 @@
 
 #include "nemo-action-manager.h"
 
+#include <errno.h>
 #include <gio/gio.h>
 #include <glib/gstdio.h>
 
@@ -140,20 +141,33 @@ nemo_action_manager_constructed (GObject *object)
 
     G_OBJECT_CLASS (nemo_action_manager_parent_class)->constructed (object);
 
+    g_autoptr (GError) monitor_error = NULL;
+
     self->actions_dir = g_build_filename (g_get_user_data_dir (),
                                           "nemo", "actions", NULL);
-    g_mkdir_with_parents (self->actions_dir, 0755);
+    if (g_mkdir_with_parents (self->actions_dir, 0755) != 0)
+    {
+        g_warning ("Nemo action manager: cannot create %s: %s",
+                   self->actions_dir, g_strerror (errno));
+    }
     self->actions_location = g_file_new_for_path (self->actions_dir);
 
     load_actions (self);
 
     self->monitor = g_file_monitor_directory (self->actions_location,
-                                              G_FILE_MONITOR_NONE, NULL, NULL);
-    if (self->monitor != NULL)
+                                              G_FILE_MONITOR_NONE, NULL,
+                                              &monitor_error);
+    if (self->monitor == NULL)
     {
-        g_signal_connect_swapped (self->monitor, "changed",
-                                  G_CALLBACK (on_directory_changed), self);
+        g_warning ("Nemo action manager: cannot watch %s for changes "
+                   "(live reload of .nemo_action files will not work): %s",
+                   self->actions_dir,
+                   monitor_error != NULL ? monitor_error->message : "unknown error");
+        return;
     }
+
+    g_signal_connect_swapped (self->monitor, "changed",
+                              G_CALLBACK (on_directory_changed), self);
 }
 
 static void

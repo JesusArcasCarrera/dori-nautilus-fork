@@ -397,11 +397,16 @@ query_editor_changed_callback (NautilusQueryEditor *editor,
     NautilusListBase *list_base;
     g_autofree char *text = NULL;
 
+    if (self->content_view == NULL)
+    {
+        /* Nothing to dispatch to; bail out before dereferencing. */
+        return;
+    }
+
     mode = (NautilusTypeToAction) g_settings_get_enum (nautilus_preferences,
                                                        NAUTILUS_PREFERENCES_TYPE_TO_ACTION);
 
-    if (mode == NAUTILUS_TYPE_TO_ACTION_SEARCH ||
-        self->content_view == NULL)
+    if (mode == NAUTILUS_TYPE_TO_ACTION_SEARCH)
     {
         nautilus_files_view_set_search_query (self->content_view, query);
 
