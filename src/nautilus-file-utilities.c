@@ -30,6 +30,7 @@
 #include "nautilus-icon-names.h"
 #include "nautilus-metadata.h"
 #include "nautilus-network-directory.h"
+#include "nautilus-other-locations-directory.h"
 #include "nautilus-scheme.h"
 #include "nautilus-search-directory.h"
 #include "nautilus-starred-directory.h"
@@ -1063,6 +1064,7 @@ nautilus_ensure_extension_builtins (void)
      * is iterating over its extensions.
      */
     g_type_ensure (NAUTILUS_TYPE_NETWORK_DIRECTORY);
+    g_type_ensure (NAUTILUS_TYPE_OTHER_LOCATIONS_DIRECTORY);
     g_type_ensure (NAUTILUS_TYPE_SEARCH_DIRECTORY);
     g_type_ensure (NAUTILUS_TYPE_STARRED_DIRECTORY);
 }

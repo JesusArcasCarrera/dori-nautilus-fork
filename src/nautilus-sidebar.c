@@ -1001,6 +1001,22 @@ update_places (NautilusSidebar *sidebar)
         g_object_unref (start_icon);
     }
 
+    /* Other Locations: combined "This Computer + Network" landing view that
+     * replaces the old Nautilus 3 places sidebar entry. Gated behind the
+     * Network row preference so toggling Network off hides this too. */
+    if (g_settings_get_boolean (nautilus_preferences,
+                                NAUTILUS_PREFERENCES_SIDEBAR_SHOW_NETWORK))
+    {
+        start_icon = g_themed_icon_new_with_default_fallbacks ("drive-multidisk-symbolic");
+        add_place (sidebar, NAUTILUS_SIDEBAR_ROW_BUILT_IN,
+                   NAUTILUS_SIDEBAR_SECTION_DEFAULT_LOCATIONS,
+                   _("Other Locations"), start_icon, NULL,
+                   SCHEME_OTHER_LOCATIONS ":///",
+                   NULL, NULL, NULL, NULL, 0,
+                   _("Show local drives and remote shares"));
+        g_object_unref (start_icon);
+    }
+
     /* Trash */
     if (sidebar->show_trash &&
         g_settings_get_boolean (nautilus_preferences,

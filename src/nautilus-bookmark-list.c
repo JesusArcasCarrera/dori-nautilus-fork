@@ -691,6 +691,7 @@ nautilus_bookmark_list_can_bookmark (NautilusBookmarkList *list,
     if (g_file_has_uri_scheme (location, SCHEME_RECENT) ||
         g_file_has_uri_scheme (location, SCHEME_STARRED) ||
         g_file_has_uri_scheme (location, SCHEME_NETWORK_VIEW) ||
+        g_file_has_uri_scheme (location, SCHEME_OTHER_LOCATIONS) ||
         nautilus_is_home_directory (location) ||
         g_file_has_uri_scheme (location, SCHEME_TRASH))
     {

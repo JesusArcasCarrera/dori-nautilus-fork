@@ -3736,6 +3736,12 @@ nautilus_files_view_update_status_overlay (NautilusFilesView *self)
             adw_status_page_set_title (status_page, _("No Known Connections"));
             adw_status_page_set_description (status_page, _("Enter an address to connect to a network location."));
         }
+        else if (g_file_has_uri_scheme (self->location, SCHEME_OTHER_LOCATIONS))
+        {
+            adw_status_page_set_icon_name (status_page, "drive-multidisk-symbolic");
+            adw_status_page_set_title (status_page, _("No Locations"));
+            adw_status_page_set_description (status_page, _("Connect a drive or enter an address to mount a network location."));
+        }
         else
         {
             adw_status_page_set_icon_name (status_page, "folder-symbolic");

@@ -297,7 +297,8 @@ nautilus_window_slot_get_view_id_for_location (NautilusWindowSlot *self,
         }
     }
 
-    if (nautilus_is_root_for_scheme (effective_location, SCHEME_NETWORK_VIEW))
+    if (nautilus_is_root_for_scheme (effective_location, SCHEME_NETWORK_VIEW) ||
+        nautilus_is_root_for_scheme (effective_location, SCHEME_OTHER_LOCATIONS))
     {
         return NAUTILUS_VIEW_NETWORK_ID;
     }

@@ -724,7 +724,8 @@ nautilus_window_sync_location_widgets (NautilusWindow *window)
     if (location != NULL)
     {
         gtk_widget_set_visible (window->network_address_bar,
-                                g_file_has_uri_scheme (location, SCHEME_NETWORK_VIEW));
+                                g_file_has_uri_scheme (location, SCHEME_NETWORK_VIEW) ||
+                                g_file_has_uri_scheme (location, SCHEME_OTHER_LOCATIONS));
     }
 }
 

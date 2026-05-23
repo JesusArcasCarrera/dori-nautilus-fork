@@ -1080,7 +1080,8 @@ setup_button_type (ButtonData      *button_data,
         button_data->is_root = TRUE;
     }
     else if (nautilus_is_root_for_scheme (location, SCHEME_NETWORK_VIEW) ||
-             nautilus_is_root_for_scheme (location, SCHEME_NETWORK))
+             nautilus_is_root_for_scheme (location, SCHEME_NETWORK) ||
+             nautilus_is_root_for_scheme (location, SCHEME_OTHER_LOCATIONS))
     {
         button_data->type = NETWORK_BUTTON;
         button_data->is_root = TRUE;

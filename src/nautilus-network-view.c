@@ -7,6 +7,7 @@
 #include "nautilus-network-view.h"
 
 #include <glib/gi18n.h>
+#include <string.h>
 
 #include "nautilus-file.h"
 #include "nautilus-global-preferences.h"
@@ -44,15 +45,59 @@ real_get_view_info (NautilusListBase *list_base)
 
 enum
 {
+    SECTION_THIS_COMPUTER,
     SECTION_CONNECTED,
     SECTION_PREVIOUS,
     SECTION_AVAILABLE,
 };
 
+/* A mountable file is considered "local" (and therefore belongs in the
+ * "This Computer" section) when its icon doesn't advertise remote/network
+ * semantics. We use the icon as a proxy because GVolume doesn't expose a
+ * cheap is_remote() — same trick used by NautilusNetworkDirectory to filter
+ * remote mountables in the opposite direction.
+ *
+ * Files that aren't mountables at all (recent servers, network peers) are
+ * never "This Computer". */
+static gboolean
+file_is_local_mountable (NautilusFile *file)
+{
+    g_autoptr (GFile) location = nautilus_file_get_location (file);
+
+    if (!g_file_has_uri_scheme (location, SCHEME_COMPUTER))
+    {
+        return FALSE;
+    }
+
+    g_autoptr (GIcon) icon = nautilus_file_get_gicon (file, NAUTILUS_FILE_ICON_FLAGS_NONE);
+
+    if (G_IS_THEMED_ICON (icon))
+    {
+        const gchar * const *names = g_themed_icon_get_names (G_THEMED_ICON (icon));
+
+        for (gsize i = 0; names[i] != NULL; i++)
+        {
+            if (strstr (names[i], "network") || strstr (names[i], "remote"))
+            {
+                return FALSE;
+            }
+        }
+    }
+
+    return TRUE;
+}
+
 static inline gint
 get_section (NautilusViewItem *item)
 {
     NautilusFile *file = nautilus_view_item_get_file (item);
+
+    /* Local drives, optical media and other native mountables make up the
+     * "This Computer" group of the Other Locations view. */
+    if (file_is_local_mountable (file))
+    {
+        return SECTION_THIS_COMPUTER;
+    }
 
     if (nautilus_file_can_unmount (file))
     {
@@ -258,6 +303,15 @@ bind_header (GtkSignalListItemFactory *factory,
 
     switch (get_section (item))
     {
+        case SECTION_THIS_COMPUTER:
+        {
+            /* Translators: Header for local drives and volumes shown in
+             * the Other Locations view ("This Computer" matches GNOME's
+             * historical naming used in legacy nautilus). */
+            gtk_label_set_label (GTK_LABEL (label), _("This Computer"));
+        }
+        break;
+
         case SECTION_CONNECTED:
         {
             /* Translators: This refers to network places which are currently mounted */
