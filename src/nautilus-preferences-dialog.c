@@ -26,6 +26,7 @@
 #include "nautilus-preferences-dialog.h"
 
 #include <adwaita.h>
+#include <gio/gio.h>
 #include <glib/gi18n.h>
 #include <nautilus-extension.h>
 
@@ -408,6 +409,351 @@ setup_custom_actions_page (GtkBuilder *builder)
                              G_CONNECT_DEFAULT);
 }
 
+/* ---------- Drives overview page ---------- */
+
+/* Rows currently shown in the Drives group; we drop them before every
+ * rebuild triggered by GVolumeMonitor signals. Stored on the group
+ * widget so its lifetime matches the dialog. */
+#define DRIVES_ROWS_KEY "nemo-drives-rows"
+#define DRIVES_MONITOR_KEY "nemo-drives-monitor"
+#define DRIVES_REBUILD_PENDING_KEY "nemo-drives-rebuild-pending"
+
+static void rebuild_drives_rows (AdwPreferencesGroup *group);
+
+/* Compose the size summary in the same shape the sidebar tooltip uses:
+ * "<free> / <used>". Returns NULL when the filesystem doesn't report
+ * sizes (e.g. virtual mounts) so callers can fall back to a dash. */
+static char *
+build_drive_size_summary (GFile    *root,
+                          double   *out_fraction)
+{
+    g_autoptr (GFileInfo) info = NULL;
+    guint64 total;
+    guint64 free_bytes;
+    guint64 used_bytes;
+    g_autofree char *free_str = NULL;
+    g_autofree char *used_str = NULL;
+
+    if (out_fraction != NULL)
+    {
+        *out_fraction = -1.0;
+    }
+
+    if (root == NULL || !g_file_is_native (root))
+    {
+        return NULL;
+    }
+
+    info = g_file_query_filesystem_info (root,
+                                         G_FILE_ATTRIBUTE_FILESYSTEM_SIZE ","
+                                         G_FILE_ATTRIBUTE_FILESYSTEM_FREE,
+                                         NULL, NULL);
+    if (info == NULL ||
+        !g_file_info_has_attribute (info, G_FILE_ATTRIBUTE_FILESYSTEM_SIZE) ||
+        !g_file_info_has_attribute (info, G_FILE_ATTRIBUTE_FILESYSTEM_FREE))
+    {
+        return NULL;
+    }
+
+    total = g_file_info_get_attribute_uint64 (info, G_FILE_ATTRIBUTE_FILESYSTEM_SIZE);
+    free_bytes = g_file_info_get_attribute_uint64 (info, G_FILE_ATTRIBUTE_FILESYSTEM_FREE);
+    used_bytes = total > free_bytes ? total - free_bytes : 0;
+
+    if (total > 0 && out_fraction != NULL)
+    {
+        *out_fraction = CLAMP ((double) used_bytes / (double) total, 0.0, 1.0);
+    }
+
+    free_str = g_format_size (free_bytes);
+    used_str = g_format_size (used_bytes);
+
+    return g_strdup_printf ("%s / %s", free_str, used_str);
+}
+
+/* Pull the best symbolic icon for a row: mount first (most specific),
+ * then volume, then drive. Caller takes ownership. */
+static GIcon *
+pick_drive_icon (GMount  *mount,
+                 GVolume *volume,
+                 GDrive  *drive)
+{
+    GIcon *icon = NULL;
+
+    if (mount != NULL)
+    {
+        icon = g_mount_get_symbolic_icon (mount);
+    }
+    if (icon == NULL && volume != NULL)
+    {
+        icon = g_volume_get_symbolic_icon (volume);
+    }
+    if (icon == NULL && drive != NULL)
+    {
+        icon = g_drive_get_symbolic_icon (drive);
+    }
+    if (icon == NULL)
+    {
+        icon = g_themed_icon_new ("drive-harddisk-symbolic");
+    }
+
+    return icon;
+}
+
+static char *
+pick_drive_name (GMount  *mount,
+                 GVolume *volume,
+                 GDrive  *drive)
+{
+    if (mount != NULL)
+    {
+        return g_mount_get_name (mount);
+    }
+    if (volume != NULL)
+    {
+        return g_volume_get_name (volume);
+    }
+    if (drive != NULL)
+    {
+        return g_drive_get_name (drive);
+    }
+    return g_strdup (_("Unknown drive"));
+}
+
+/* Append one ActionRow describing a (drive, volume, mount) triple. Any
+ * of them may be NULL — that's how we cover both real mounts and bare
+ * volumes/drives. */
+static void
+append_drive_row (AdwPreferencesGroup  *group,
+                  GList               **rows,
+                  GDrive               *drive,
+                  GVolume              *volume,
+                  GMount               *mount)
+{
+    AdwActionRow *row = ADW_ACTION_ROW (adw_action_row_new ());
+    g_autoptr (GIcon) icon = pick_drive_icon (mount, volume, drive);
+    g_autofree char *name = pick_drive_name (mount, volume, drive);
+    g_autoptr (GFile) root = NULL;
+    g_autofree char *mount_path = NULL;
+    g_autofree char *size_text = NULL;
+    double fraction = -1.0;
+    GtkWidget *suffix_box;
+    GtkWidget *progress;
+    GtkWidget *size_label;
+    GtkWidget *icon_image;
+
+    if (mount != NULL)
+    {
+        root = g_mount_get_default_location (mount);
+        mount_path = g_file_get_parse_name (root);
+        size_text = build_drive_size_summary (root, &fraction);
+    }
+
+    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (row), name);
+    adw_action_row_set_subtitle (row,
+                                 mount_path != NULL ? mount_path : _("Not mounted"));
+
+    icon_image = gtk_image_new_from_gicon (icon);
+    gtk_image_set_icon_size (GTK_IMAGE (icon_image), GTK_ICON_SIZE_LARGE);
+    adw_action_row_add_prefix (row, icon_image);
+
+    suffix_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 2);
+    gtk_widget_set_valign (suffix_box, GTK_ALIGN_CENTER);
+
+    progress = gtk_progress_bar_new ();
+    gtk_widget_set_size_request (progress, 140, -1);
+    gtk_widget_set_valign (progress, GTK_ALIGN_CENTER);
+    if (fraction >= 0.0)
+    {
+        gtk_progress_bar_set_fraction (GTK_PROGRESS_BAR (progress), fraction);
+    }
+    else
+    {
+        /* No data — fade out so it doesn't look like 0% used. */
+        gtk_widget_set_opacity (progress, 0.35);
+    }
+    gtk_box_append (GTK_BOX (suffix_box), progress);
+
+    size_label = gtk_label_new (size_text != NULL ? size_text : "—");
+    gtk_widget_add_css_class (size_label, "dim-label");
+    gtk_widget_add_css_class (size_label, "caption");
+    gtk_label_set_xalign (GTK_LABEL (size_label), 1.0);
+    gtk_box_append (GTK_BOX (suffix_box), size_label);
+
+    adw_action_row_add_suffix (row, suffix_box);
+
+    adw_preferences_group_add (group, GTK_WIDGET (row));
+    *rows = g_list_prepend (*rows, row);
+}
+
+/* Volume monitor signals fire in bursts (e.g. a single mount yields
+ * volume-added + mount-added). Coalesce them into one idle rebuild. */
+static gboolean
+rebuild_drives_idle_cb (gpointer user_data)
+{
+    AdwPreferencesGroup *group = ADW_PREFERENCES_GROUP (user_data);
+
+    g_object_set_data (G_OBJECT (group), DRIVES_REBUILD_PENDING_KEY,
+                       GINT_TO_POINTER (FALSE));
+    rebuild_drives_rows (group);
+
+    return G_SOURCE_REMOVE;
+}
+
+static void
+schedule_drives_rebuild (AdwPreferencesGroup *group)
+{
+    gboolean pending = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (group),
+                                                           DRIVES_REBUILD_PENDING_KEY));
+
+    if (pending)
+    {
+        return;
+    }
+    g_object_set_data (G_OBJECT (group), DRIVES_REBUILD_PENDING_KEY,
+                       GINT_TO_POINTER (TRUE));
+    g_idle_add_full (G_PRIORITY_DEFAULT_IDLE, rebuild_drives_idle_cb,
+                     g_object_ref (group), g_object_unref);
+}
+
+static void
+on_volume_monitor_changed (GVolumeMonitor      *monitor,
+                           gpointer             changed,
+                           AdwPreferencesGroup *group)
+{
+    schedule_drives_rebuild (group);
+}
+
+static void
+rebuild_drives_rows (AdwPreferencesGroup *group)
+{
+    GList *previous;
+    GList *current = NULL;
+    GVolumeMonitor *monitor;
+    g_autolist (GDrive) drives = NULL;
+    g_autolist (GVolume) orphan_volumes = NULL;
+    g_autolist (GMount) orphan_mounts = NULL;
+
+    previous = g_object_get_data (G_OBJECT (group), DRIVES_ROWS_KEY);
+    for (GList *l = previous; l != NULL; l = l->next)
+    {
+        adw_preferences_group_remove (group, GTK_WIDGET (l->data));
+    }
+    g_list_free (previous);
+    g_object_set_data (G_OBJECT (group), DRIVES_ROWS_KEY, NULL);
+
+    monitor = g_object_get_data (G_OBJECT (group), DRIVES_MONITOR_KEY);
+    if (monitor == NULL)
+    {
+        return;
+    }
+
+    drives = g_volume_monitor_get_connected_drives (monitor);
+    for (GList *d = drives; d != NULL; d = d->next)
+    {
+        GDrive *drive = d->data;
+        g_autolist (GVolume) volumes = g_drive_get_volumes (drive);
+
+        if (volumes == NULL)
+        {
+            /* Drive without volumes (e.g. empty card reader). */
+            append_drive_row (group, &current, drive, NULL, NULL);
+            continue;
+        }
+
+        for (GList *v = volumes; v != NULL; v = v->next)
+        {
+            GVolume *volume = v->data;
+            g_autoptr (GMount) mount = g_volume_get_mount (volume);
+
+            append_drive_row (group, &current, drive, volume, mount);
+        }
+    }
+
+    /* Volumes that don't belong to any drive (e.g. some encrypted or
+     * pseudo-block devices). Avoid listing them twice. */
+    orphan_volumes = g_volume_monitor_get_volumes (monitor);
+    for (GList *v = orphan_volumes; v != NULL; v = v->next)
+    {
+        GVolume *volume = v->data;
+        g_autoptr (GDrive) drive = g_volume_get_drive (volume);
+        g_autoptr (GMount) mount = NULL;
+
+        if (drive != NULL)
+        {
+            continue;
+        }
+        mount = g_volume_get_mount (volume);
+        append_drive_row (group, &current, NULL, volume, mount);
+    }
+
+    /* Mounts without an associated volume (e.g. network shares, GVFS
+     * backends). */
+    orphan_mounts = g_volume_monitor_get_mounts (monitor);
+    for (GList *m = orphan_mounts; m != NULL; m = m->next)
+    {
+        GMount *mount = m->data;
+        g_autoptr (GVolume) volume = g_mount_get_volume (mount);
+
+        if (volume != NULL)
+        {
+            continue;
+        }
+        append_drive_row (group, &current, NULL, NULL, mount);
+    }
+
+    if (current == NULL)
+    {
+        AdwActionRow *empty = ADW_ACTION_ROW (adw_action_row_new ());
+
+        adw_preferences_row_set_title (ADW_PREFERENCES_ROW (empty),
+                                       _("No drives detected"));
+        adw_action_row_set_subtitle (empty,
+            _("Connect a drive or mount a network location to see it here."));
+        adw_preferences_group_add (group, GTK_WIDGET (empty));
+        current = g_list_prepend (current, empty);
+    }
+
+    g_object_set_data (G_OBJECT (group), DRIVES_ROWS_KEY, current);
+}
+
+/* Set up the Drives overview page: one row per drive/volume/mount with
+ * an icon, a usage bar and a "<free> / <used>" caption. The volume
+ * monitor's lifetime is tied to the group, and add/remove signals
+ * trigger a coalesced rebuild. */
+static void
+setup_drives_page (GtkBuilder *builder)
+{
+    AdwPreferencesGroup *group;
+    GVolumeMonitor *monitor;
+
+    group = ADW_PREFERENCES_GROUP (gtk_builder_get_object (builder,
+                                                           "drives_group"));
+    monitor = g_volume_monitor_get ();
+    g_object_set_data_full (G_OBJECT (group), DRIVES_MONITOR_KEY, monitor,
+                            g_object_unref);
+
+    g_signal_connect_object (monitor, "volume-added",
+                             G_CALLBACK (on_volume_monitor_changed), group,
+                             G_CONNECT_DEFAULT);
+    g_signal_connect_object (monitor, "volume-removed",
+                             G_CALLBACK (on_volume_monitor_changed), group,
+                             G_CONNECT_DEFAULT);
+    g_signal_connect_object (monitor, "mount-added",
+                             G_CALLBACK (on_volume_monitor_changed), group,
+                             G_CONNECT_DEFAULT);
+    g_signal_connect_object (monitor, "mount-removed",
+                             G_CALLBACK (on_volume_monitor_changed), group,
+                             G_CONNECT_DEFAULT);
+    g_signal_connect_object (monitor, "drive-connected",
+                             G_CALLBACK (on_volume_monitor_changed), group,
+                             G_CONNECT_DEFAULT);
+    g_signal_connect_object (monitor, "drive-disconnected",
+                             G_CALLBACK (on_volume_monitor_changed), group,
+                             G_CONNECT_DEFAULT);
+
+    rebuild_drives_rows (group);
+}
+
 static void
 nautilus_preferences_dialog_setup (GtkBuilder *builder)
 {
@@ -489,6 +835,7 @@ nautilus_preferences_dialog_setup (GtkBuilder *builder)
                             (const char **) type_to_action_values);
 
     setup_custom_actions_page (builder);
+    setup_drives_page (builder);
 }
 
 void

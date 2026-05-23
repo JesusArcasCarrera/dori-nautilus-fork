@@ -167,4 +167,14 @@ Adw.PreferencesDialog preferences_dialog {
       description: _("User-defined entries shown in the right-click menu. Action files live in ~/.local/share/nemo/actions/ as .nemo_action GKeyFiles (Cinnamon Nemo format). A built-in editor is coming; for now, files are edited by hand and reloaded automatically.");
     }
   }
+
+  Adw.PreferencesPage drives_page {
+    title: _("Drives");
+    icon-name: "drive-harddisk-symbolic";
+
+    Adw.PreferencesGroup drives_group {
+      title: _("Connected Drives");
+      description: _("Overview of drives and volumes detected on this device. Mounted drives show used and total space.");
+    }
+  }
 }
