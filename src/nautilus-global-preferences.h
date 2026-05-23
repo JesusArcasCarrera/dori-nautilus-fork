@@ -138,6 +138,7 @@ typedef enum
 #define NAUTILUS_PREFERENCES_SIDEBAR_SHOW_TRASH       "sidebar-show-trash"
 #define NAUTILUS_PREFERENCES_SIDEBAR_SHOW_XDG_SECTION "sidebar-show-xdg-section"
 #define NAUTILUS_PREFERENCES_SIDEBAR_SHOW_CLOUD       "sidebar-show-cloud"
+#define NAUTILUS_PREFERENCES_SIDEBAR_PLACES           "sidebar-places"
 
 /* Full Text Search enabled */
 #define NAUTILUS_PREFERENCES_FTS_ENABLED "fts-enabled"

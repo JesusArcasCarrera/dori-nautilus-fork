@@ -230,6 +230,11 @@
       <summary>Whether to show the XDG user directories section in the sidebar</summary>
       <description>If set to true, the sidebar will include a dedicated section listing the XDG user directories (Documents, Downloads, Music, Pictures, Videos, Public Share and Templates).</description>
     </key>
+    <key type="as" name="sidebar-places">
+      <default>[]</default>
+      <summary>User-managed list of URIs shown in the sidebar XDG section</summary>
+      <description>List of folder URIs displayed in the editable sidebar section that lives between the built-in shortcuts and the user bookmarks. When the list is empty Files seeds it once with the available XDG user-special directories (Documents, Downloads, Music, …). Users can add entries by dragging folders onto the section and remove them from the context menu.</description>
+    </key>
     <key type="b" name="sidebar-show-cloud">
       <default>true</default>
       <summary>Whether to show the Cloud providers section in the sidebar</summary>

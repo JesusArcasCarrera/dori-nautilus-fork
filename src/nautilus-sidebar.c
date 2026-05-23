@@ -499,40 +499,208 @@ path_is_home_dir (const char *path)
     return res;
 }
 
-/* Whether @location is one of the XDG user-special directories. Used to
- * route Documents/Downloads/Music/... into their own sidebar section so the
- * user's actual bookmarks aren't drowned in defaults. */
-static gboolean
-location_is_xdg_special_dir (GFile *location)
+/* Resolve a symbolic icon name for a folder displayed inside the editable
+ * XDG section. When @path matches a known XDG user-special directory we use
+ * its themed folder icon, otherwise fall back to the generic folder icon so
+ * user-added paths still look right. */
+static const char *
+icon_name_for_sidebar_place (const char *path)
+{
+    static const struct
+    {
+        GUserDirectory dir;
+        const char    *icon;
+    } xdg_specs[] = {
+        { G_USER_DIRECTORY_DOCUMENTS,     "folder-documents-symbolic"   },
+        { G_USER_DIRECTORY_DOWNLOAD,      "folder-download-symbolic"    },
+        { G_USER_DIRECTORY_MUSIC,         "folder-music-symbolic"       },
+        { G_USER_DIRECTORY_PICTURES,      "folder-pictures-symbolic"    },
+        { G_USER_DIRECTORY_VIDEOS,        "folder-videos-symbolic"      },
+        { G_USER_DIRECTORY_PUBLIC_SHARE,  "folder-publicshare-symbolic" },
+        { G_USER_DIRECTORY_TEMPLATES,     "folder-templates-symbolic"   },
+        { G_USER_DIRECTORY_DESKTOP,       ICON_NAME_DESKTOP             },
+    };
+
+    if (path == NULL)
+    {
+        return "folder-symbolic";
+    }
+
+    for (gsize i = 0; i < G_N_ELEMENTS (xdg_specs); i++)
+    {
+        const char *xdg_path = g_get_user_special_dir (xdg_specs[i].dir);
+
+        if (xdg_path != NULL && g_str_equal (xdg_path, path))
+        {
+            return xdg_specs[i].icon;
+        }
+    }
+    return "folder-symbolic";
+}
+
+/* First-run seeding: when sidebar-places is empty, populate it with the URIs
+ * of the visible XDG user-special directories so users keep the familiar
+ * Documents/Downloads/... shortcuts. Persists the result so it only happens
+ * once per profile. Returns a freshly-allocated NULL-terminated strv that
+ * the caller owns. */
+static GStrv
+sidebar_places_get_or_seed (void)
 {
     static const GUserDirectory xdg_kinds[] = {
-        G_USER_DIRECTORY_DESKTOP,
         G_USER_DIRECTORY_DOCUMENTS,
         G_USER_DIRECTORY_DOWNLOAD,
         G_USER_DIRECTORY_MUSIC,
         G_USER_DIRECTORY_PICTURES,
+        G_USER_DIRECTORY_VIDEOS,
         G_USER_DIRECTORY_PUBLIC_SHARE,
         G_USER_DIRECTORY_TEMPLATES,
-        G_USER_DIRECTORY_VIDEOS,
     };
-    const char *home = g_get_home_dir ();
+    GStrv places = g_settings_get_strv (nautilus_preferences,
+                                        NAUTILUS_PREFERENCES_SIDEBAR_PLACES);
+
+    if (places != NULL && places[0] != NULL)
+    {
+        return places;
+    }
+
+    g_strfreev (places);
+
+    /* Build defaults from existing, non-home XDG dirs only. */
+    const char *home_path = g_get_home_dir ();
+    g_autoptr (GPtrArray) seeded = g_ptr_array_new_with_free_func (g_free);
 
     for (gsize i = 0; i < G_N_ELEMENTS (xdg_kinds); i++)
     {
         const char *path = g_get_user_special_dir (xdg_kinds[i]);
-        g_autoptr (GFile) candidate = NULL;
+        char *uri;
 
-        if (path == NULL || (home != NULL && g_str_equal (path, home)))
+        if (path == NULL ||
+            (home_path != NULL && g_str_equal (path, home_path)))
         {
             continue;
         }
-        candidate = g_file_new_for_path (path);
-        if (g_file_equal (location, candidate))
+        uri = g_filename_to_uri (path, NULL, NULL);
+        if (uri != NULL)
         {
-            return TRUE;
+            g_ptr_array_add (seeded, uri);
         }
     }
-    return FALSE;
+
+    g_ptr_array_add (seeded, NULL);
+    places = (GStrv) g_ptr_array_steal (seeded, NULL);
+
+    /* Persist the seed so the section stays stable across sessions. Setting
+     * the value also fires changed::sidebar-places — the sidebar guards its
+     * own handler against the resulting re-entry below. */
+    g_settings_set_strv (nautilus_preferences,
+                         NAUTILUS_PREFERENCES_SIDEBAR_PLACES,
+                         (const gchar * const *) places);
+    return places;
+}
+
+/* Whether @uri is currently listed in sidebar-places. */
+static gboolean
+sidebar_places_contains (const char * const *places,
+                         const char         *uri)
+{
+    if (places == NULL || uri == NULL)
+    {
+        return FALSE;
+    }
+    return g_strv_contains (places, uri);
+}
+
+/* Whether @location belongs to the current sidebar-places list. Used to keep
+ * the bookmarks section from showing the same entry twice. */
+static gboolean
+location_is_sidebar_place (GFile *location)
+{
+    g_auto (GStrv) places = NULL;
+    g_autofree char *uri = NULL;
+
+    if (location == NULL)
+    {
+        return FALSE;
+    }
+
+    uri = g_file_get_uri (location);
+    places = g_settings_get_strv (nautilus_preferences,
+                                  NAUTILUS_PREFERENCES_SIDEBAR_PLACES);
+    return sidebar_places_contains ((const char * const *) places, uri);
+}
+
+/* Append @uri to sidebar-places (no-op if already present). */
+static void
+sidebar_places_add (const char *uri)
+{
+    g_auto (GStrv) places = NULL;
+    g_autoptr (GPtrArray) updated = NULL;
+
+    if (uri == NULL)
+    {
+        return;
+    }
+
+    places = g_settings_get_strv (nautilus_preferences,
+                                  NAUTILUS_PREFERENCES_SIDEBAR_PLACES);
+    if (sidebar_places_contains ((const char * const *) places, uri))
+    {
+        return;
+    }
+
+    updated = g_ptr_array_new_with_free_func (g_free);
+    for (gsize i = 0; places != NULL && places[i] != NULL; i++)
+    {
+        g_ptr_array_add (updated, g_strdup (places[i]));
+    }
+    g_ptr_array_add (updated, g_strdup (uri));
+    g_ptr_array_add (updated, NULL);
+
+    g_settings_set_strv (nautilus_preferences,
+                         NAUTILUS_PREFERENCES_SIDEBAR_PLACES,
+                         (const gchar * const *) updated->pdata);
+}
+
+/* Drop @uri from sidebar-places. */
+static void
+sidebar_places_remove (const char *uri)
+{
+    g_auto (GStrv) places = NULL;
+    g_autoptr (GPtrArray) updated = NULL;
+    gboolean removed = FALSE;
+
+    if (uri == NULL)
+    {
+        return;
+    }
+
+    places = g_settings_get_strv (nautilus_preferences,
+                                  NAUTILUS_PREFERENCES_SIDEBAR_PLACES);
+    if (places == NULL)
+    {
+        return;
+    }
+
+    updated = g_ptr_array_new_with_free_func (g_free);
+    for (gsize i = 0; places[i] != NULL; i++)
+    {
+        if (!removed && g_str_equal (places[i], uri))
+        {
+            removed = TRUE;
+            continue;
+        }
+        g_ptr_array_add (updated, g_strdup (places[i]));
+    }
+    g_ptr_array_add (updated, NULL);
+
+    if (!removed)
+    {
+        return;
+    }
+
+    g_settings_set_strv (nautilus_preferences,
+                         NAUTILUS_PREFERENCES_SIDEBAR_PLACES,
+                         (const gchar * const *) updated->pdata);
 }
 
 /* Tooltip for a mount entry in the sidebar: parse-friendly path plus a
@@ -849,58 +1017,47 @@ update_places (NautilusSidebar *sidebar)
         g_object_unref (start_icon);
     }
 
-    /* XDG user-special directories (Documents, Downloads, Music, …) get
-     * their own section between the built-ins and the user bookmarks, so
-     * defaults stop drowning user-added bookmarks. Skipped entirely when
-     * the user has disabled the section in Preferences. */
+    /* Editable XDG/places section: lives between the built-ins and the user
+     * bookmarks. Backed by the sidebar-places GSettings strv so users can
+     * drag folders in and remove entries from the context menu. The list is
+     * seeded with the XDG user-special directories on first run. */
     if (g_settings_get_boolean (nautilus_preferences,
                                 NAUTILUS_PREFERENCES_SIDEBAR_SHOW_XDG_SECTION))
     {
-        static const struct
-        {
-            GUserDirectory dir;
-            const char    *icon;
-        } xdg_specs[] = {
-            { G_USER_DIRECTORY_DOCUMENTS,     "folder-documents-symbolic"   },
-            { G_USER_DIRECTORY_DOWNLOAD,      "folder-download-symbolic"    },
-            { G_USER_DIRECTORY_MUSIC,         "folder-music-symbolic"       },
-            { G_USER_DIRECTORY_PICTURES,      "folder-pictures-symbolic"    },
-            { G_USER_DIRECTORY_VIDEOS,        "folder-videos-symbolic"      },
-            { G_USER_DIRECTORY_PUBLIC_SHARE,  "folder-publicshare-symbolic" },
-            { G_USER_DIRECTORY_TEMPLATES,     "folder-templates-symbolic"   },
-        };
-        const char *home_path = g_get_home_dir ();
+        g_auto (GStrv) places = sidebar_places_get_or_seed ();
 
-        for (gsize i = 0; i < G_N_ELEMENTS (xdg_specs); i++)
+        for (gsize i = 0; places != NULL && places[i] != NULL; i++)
         {
-            const char *path = g_get_user_special_dir (xdg_specs[i].dir);
-            g_autofree char *xdg_uri = NULL;
-            g_autofree char *xdg_name = NULL;
+            const char *place_uri = places[i];
+            g_autoptr (GFile) place_file = g_file_new_for_uri (place_uri);
+            g_autofree char *place_path = g_file_get_path (place_file);
+            g_autofree char *place_name = NULL;
+            g_autofree char *place_tooltip = NULL;
+            const char *icon_name;
 
-            if (path == NULL ||
-                (home_path != NULL && g_str_equal (path, home_path)))
+            place_name = g_file_get_basename (place_file);
+            if (place_name == NULL || place_name[0] == '\0')
             {
-                continue;
+                g_free (place_name);
+                place_name = g_strdup (place_uri);
             }
-            xdg_uri = g_filename_to_uri (path, NULL, NULL);
-            if (xdg_uri == NULL)
-            {
-                continue;
-            }
-            xdg_name = g_path_get_basename (path);
-            start_icon = g_themed_icon_new_with_default_fallbacks (xdg_specs[i].icon);
-            add_place (sidebar, NAUTILUS_SIDEBAR_ROW_BUILT_IN,
+            place_tooltip = place_path != NULL ? g_strdup (place_path)
+                                               : g_uri_unescape_string (place_uri, NULL);
+            icon_name = icon_name_for_sidebar_place (place_path);
+            start_icon = g_themed_icon_new_with_default_fallbacks (icon_name);
+            add_place (sidebar, NAUTILUS_SIDEBAR_ROW_BOOKMARK,
                        NAUTILUS_SIDEBAR_SECTION_XDG_DIRS,
-                       xdg_name, start_icon, NULL, xdg_uri,
+                       place_name, start_icon, NULL, place_uri,
                        NULL, NULL, NULL, NULL, 0,
-                       path);
+                       place_tooltip);
             g_object_unref (start_icon);
         }
     }
 
     /* User bookmarks: come right after the XDG dirs so the visual order
-     * is built-ins → XDG → bookmarks → drives. XDG-matching entries are
-     * filtered out so they don't appear in two sections at once. */
+     * is built-ins → XDG → bookmarks → drives. Entries listed in
+     * sidebar-places (the editable XDG section) are filtered out so the
+     * same URI doesn't appear in two sections at once. */
     bookmarks = nautilus_bookmark_list_get_all (sidebar->bookmark_list);
     /* Needs to start from 1 so that bookmark drag placeholder can come first. */
     index = 1;
@@ -911,7 +1068,7 @@ update_places (NautilusSidebar *sidebar)
         g_autofree char *mount_uri = nautilus_bookmark_get_uri (bl->data);
         gboolean is_native;
 
-        if (location_is_xdg_special_dir (location))
+        if (location_is_sidebar_place (location))
         {
             continue;
         }
@@ -1742,6 +1899,36 @@ drag_drop_callback (GtkDropTarget   *target,
         {
             drop_files_as_bookmarks (sidebar, file_list, target_order_index);
         }
+        else if (target_section_type == NAUTILUS_SIDEBAR_SECTION_XDG_DIRS)
+        {
+            /* Folder drops over an XDG-section row are interpreted as a
+             * request to add the source folder to sidebar-places, mirroring
+             * how NEW_BOOKMARK works for the bookmarks section. */
+            for (GSList *l = file_list; l != NULL; l = l->next)
+            {
+                GFile *f = G_FILE (l->data);
+                g_autoptr (GFileInfo) info = NULL;
+                g_autofree char *uri = NULL;
+
+                info = g_file_query_info (f,
+                                          G_FILE_ATTRIBUTE_STANDARD_TYPE,
+                                          G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS,
+                                          NULL, NULL);
+                if (info == NULL)
+                {
+                    continue;
+                }
+                if (g_file_info_get_file_type (info) != G_FILE_TYPE_DIRECTORY &&
+                    g_file_info_get_file_type (info) != G_FILE_TYPE_SHORTCUT &&
+                    g_file_info_get_file_type (info) != G_FILE_TYPE_MOUNTABLE &&
+                    g_file_info_get_file_type (info) != G_FILE_TYPE_SYMBOLIC_LINK)
+                {
+                    continue;
+                }
+                uri = g_file_get_uri (f);
+                sidebar_places_add (uri);
+            }
+        }
         else
         {
             GFile *dest_file = g_file_new_for_uri (target_uri);
@@ -2355,19 +2542,32 @@ static void
 remove_bookmark (NautilusSidebarRow *row)
 {
     NautilusSidebarRowType type;
+    NautilusSidebarSectionType section_type;
     g_autoptr (NautilusFile) file = NULL;
+    g_autofree char *uri = NULL;
     NautilusSidebar *sidebar;
 
     g_object_get (row,
                   "sidebar", &sidebar,
                   "place-type", &type,
+                  "section-type", &section_type,
+                  "uri", &uri,
                   "file", &file,
                   NULL);
 
     if (type == NAUTILUS_SIDEBAR_ROW_BOOKMARK)
     {
-        g_autoptr (GFile) location = nautilus_file_get_location (file);
-        nautilus_bookmark_list_remove (sidebar->bookmark_list, location);
+        if (section_type == NAUTILUS_SIDEBAR_SECTION_XDG_DIRS)
+        {
+            /* Rows in the editable XDG section are backed by the
+             * sidebar-places strv, not by the user bookmark list. */
+            sidebar_places_remove (uri);
+        }
+        else if (file != NULL)
+        {
+            g_autoptr (GFile) location = nautilus_file_get_location (file);
+            nautilus_bookmark_list_remove (sidebar->bookmark_list, location);
+        }
     }
 
     g_object_unref (sidebar);
@@ -3084,10 +3284,21 @@ create_row_popover (NautilusSidebar    *sidebar,
     }
 #endif
 
-    action = g_action_map_lookup_action (G_ACTION_MAP (sidebar->row_actions), "remove");
-    g_simple_action_set_enabled (G_SIMPLE_ACTION (action), (type == NAUTILUS_SIDEBAR_ROW_BOOKMARK));
-    action = g_action_map_lookup_action (G_ACTION_MAP (sidebar->row_actions), "rename");
-    g_simple_action_set_enabled (G_SIMPLE_ACTION (action), (type == NAUTILUS_SIDEBAR_ROW_BOOKMARK));
+    {
+        NautilusSidebarSectionType row_section_type;
+
+        g_object_get (row, "section-type", &row_section_type, NULL);
+
+        action = g_action_map_lookup_action (G_ACTION_MAP (sidebar->row_actions), "remove");
+        g_simple_action_set_enabled (G_SIMPLE_ACTION (action),
+                                     (type == NAUTILUS_SIDEBAR_ROW_BOOKMARK));
+        action = g_action_map_lookup_action (G_ACTION_MAP (sidebar->row_actions), "rename");
+        /* Rows in the editable XDG section are not backed by NautilusBookmark
+         * objects, so renaming them would silently no-op — hide the entry. */
+        g_simple_action_set_enabled (G_SIMPLE_ACTION (action),
+                                     (type == NAUTILUS_SIDEBAR_ROW_BOOKMARK &&
+                                      row_section_type != NAUTILUS_SIDEBAR_SECTION_XDG_DIRS));
+    }
     action = g_action_map_lookup_action (G_ACTION_MAP (sidebar->row_actions), "open");
     g_simple_action_set_enabled (G_SIMPLE_ACTION (action), !gtk_list_box_row_is_selected (GTK_LIST_BOX_ROW (row)));
     action = g_action_map_lookup_action (G_ACTION_MAP (sidebar->row_actions), "empty-trash");
@@ -3853,6 +4064,12 @@ nautilus_sidebar_init (NautilusSidebar *sidebar)
                              G_CONNECT_SWAPPED);
     g_signal_connect_object (nautilus_preferences,
                              "changed::" NAUTILUS_PREFERENCES_SIDEBAR_SHOW_CLOUD,
+                             G_CALLBACK (update_places), sidebar,
+                             G_CONNECT_SWAPPED);
+    /* Rebuild whenever the editable XDG section list changes (drops, removes,
+     * external `gsettings set`). */
+    g_signal_connect_object (nautilus_preferences,
+                             "changed::" NAUTILUS_PREFERENCES_SIDEBAR_PLACES,
                              G_CALLBACK (update_places), sidebar,
                              G_CONNECT_SWAPPED);
 
