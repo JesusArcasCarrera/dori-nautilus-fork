@@ -171,6 +171,8 @@ libnautilus_sources = [
   'nautilus-new-folder-dialog.h',
   'nautilus-other-locations-directory.c',
   'nautilus-other-locations-directory.h',
+  'nautilus-other-locations-view.c',
+  'nautilus-other-locations-view.h',
   'nautilus-operations-ui-manager.c',
   'nautilus-operations-ui-manager.h',
   'nautilus-pathbar.c',

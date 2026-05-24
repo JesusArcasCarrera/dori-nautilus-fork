@@ -60,6 +60,7 @@
 #include "nautilus-metadata.h"
 #include "nautilus-mime-actions.h"
 #include "nautilus-network-view.h"
+#include "nautilus-other-locations-view.h"
 #include "nautilus-module.h"
 #include "nautilus-new-folder-dialog.h"
 #include "nautilus-query.h"
@@ -948,7 +949,8 @@ nautilus_files_view_get_toolbar_menu_sections (NautilusFilesView *self)
 {
     g_return_val_if_fail (NAUTILUS_IS_FILES_VIEW (self), NULL);
 
-    if (NAUTILUS_IS_NETWORK_VIEW (self->list_base))
+    if (NAUTILUS_IS_NETWORK_VIEW (self->list_base) ||
+        NAUTILUS_IS_OTHER_LOCATIONS_VIEW (self->list_base))
     {
         return NULL;
     }
@@ -3389,7 +3391,8 @@ nautilus_files_view_display_selection_info (NautilusFilesView *view)
 
     g_return_if_fail (NAUTILUS_IS_FILES_VIEW (view));
 
-    if (view->list_base != NULL && NAUTILUS_IS_NETWORK_VIEW (view->list_base))
+    if (view->list_base != NULL && (NAUTILUS_IS_NETWORK_VIEW (view->list_base) ||
+                                    NAUTILUS_IS_OTHER_LOCATIONS_VIEW (view->list_base)))
     {
         /* Selection info is not relevant on this view and visually clashes with
          * the action bar. */
@@ -7345,7 +7348,8 @@ nautilus_files_view_update_actions_state (NautilusFilesView *self)
     NautilusMode mode = nautilus_window_slot_get_mode (self->slot);
     g_autolist (NautilusFile) selection = NULL;
     GList *l;
-    gboolean is_network_view = NAUTILUS_IS_NETWORK_VIEW (self->list_base);
+    gboolean is_network_view = (NAUTILUS_IS_NETWORK_VIEW (self->list_base) ||
+                                NAUTILUS_IS_OTHER_LOCATIONS_VIEW (self->list_base));
     gboolean selection_contains_home_dir;
     gboolean selection_contains_recent;
     gboolean selection_contains_search;
@@ -8163,7 +8167,9 @@ update_selection_menu (NautilusFilesView *self,
                                             "hidden-when",
                                             (!show_scripts) ? "action-missing" : NULL);
 
-    const char *view_name = NAUTILUS_IS_NETWORK_VIEW (self->list_base) ? "network" : "normal";
+    const char *view_name = (NAUTILUS_IS_NETWORK_VIEW (self->list_base) ||
+                             NAUTILUS_IS_OTHER_LOCATIONS_VIEW (self->list_base))
+                            ? "network" : "normal";
 
     /* Filter  the menus at the end to not interfere with other checks */
     nautilus_g_menu_model_set_for_view (G_MENU_MODEL (self->selection_menu_model), view_name);
@@ -8218,7 +8224,9 @@ update_background_menu (NautilusFilesView *self,
     object = gtk_builder_get_object (builder, "background-custom-actions-section");
     build_custom_actions_menu (self, G_MENU (object), NULL);
 
-    const char *view_name = NAUTILUS_IS_NETWORK_VIEW (self->list_base) ? "network" : "normal";
+    const char *view_name = (NAUTILUS_IS_NETWORK_VIEW (self->list_base) ||
+                             NAUTILUS_IS_OTHER_LOCATIONS_VIEW (self->list_base))
+                            ? "network" : "normal";
 
     /* Filter  the menus at the end to not interfere with other checks */
     nautilus_g_menu_model_set_for_view (G_MENU_MODEL (self->background_menu_model), view_name);
@@ -9764,6 +9772,12 @@ create_inner_view (NautilusFilesView *self,
         }
         break;
 
+        case NAUTILUS_VIEW_OTHER_LOCATIONS_ID:
+        {
+            self->list_base = NAUTILUS_LIST_BASE (nautilus_other_locations_view_new ());
+        }
+        break;
+
         default:
         {
             g_critical ("Unknown view type ID: %d. Falling back to list.", id);
@@ -9799,6 +9813,7 @@ nautilus_files_view_get_toggle_icon_name (NautilusFilesView *self)
         break;
 
         case NAUTILUS_VIEW_NETWORK_ID:
+        case NAUTILUS_VIEW_OTHER_LOCATIONS_ID:
         case NAUTILUS_VIEW_GRID_ID:
         {
             return "view-list-symbolic";
@@ -9832,6 +9847,7 @@ nautilus_files_view_get_toggle_tooltip (NautilusFilesView *self)
         break;
 
         case NAUTILUS_VIEW_NETWORK_ID:
+        case NAUTILUS_VIEW_OTHER_LOCATIONS_ID:
         case NAUTILUS_VIEW_GRID_ID:
         {
             return _("List View");

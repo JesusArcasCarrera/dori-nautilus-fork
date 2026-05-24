@@ -11,6 +11,7 @@
 #define NAUTILUS_VIEW_GRID_ID            2
 /* Special ids, not used by GSettings schemas: */
 #define NAUTILUS_VIEW_NETWORK_ID         3
+#define NAUTILUS_VIEW_OTHER_LOCATIONS_ID 4
 #define NAUTILUS_VIEW_INVALID_ID         0
 
 typedef struct
