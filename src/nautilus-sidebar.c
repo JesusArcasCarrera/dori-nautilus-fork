@@ -107,6 +107,11 @@ struct _NautilusSidebar
     GtkWidget *swin;
     GtkWidget *list_box;
     GtkWidget *new_bookmark_row;
+    /* "Pin folder" affordance at the end of the XDG section, revealed only
+     * while dragging a folder so dropping it adds the folder to
+     * sidebar-places without stealing drops aimed at the XDG rows
+     * themselves (which keep their normal "move/copy into folder"). */
+    GtkWidget *new_place_row;
 
     NautilusBookmarkList *bookmark_list;
 
@@ -1068,6 +1073,21 @@ update_places (NautilusSidebar *sidebar)
                        place_tooltip);
             g_object_unref (start_icon);
         }
+
+        /* "Pin folder" row at the end of the XDG section. Hidden by default;
+         * revealed during folder drags so the user has a clear drop target
+         * for "add to places", separate from the per-row "move/copy into
+         * folder" affordance. */
+        {
+            g_autoptr (GIcon) pin_icon = g_themed_icon_new ("bookmark-new-symbolic");
+
+            sidebar->new_place_row = add_place (sidebar, NAUTILUS_SIDEBAR_ROW_NEW_PLACE,
+                                                NAUTILUS_SIDEBAR_SECTION_XDG_DIRS,
+                                                _("Pin folder"), pin_icon, NULL, NULL,
+                                                NULL, NULL, NULL, NULL, 0,
+                                                _("Add a folder to the pinned list"));
+            gtk_widget_add_css_class (sidebar->new_place_row, "sidebar-new-bookmark-row");
+        }
     }
 
     /* User bookmarks: come right after the XDG dirs so the visual order
@@ -1427,6 +1447,10 @@ update_places (NautilusSidebar *sidebar)
 
     /* We want this hidden by default, but need to do it after the show_all call */
     nautilus_sidebar_row_hide (NAUTILUS_SIDEBAR_ROW (sidebar->new_bookmark_row), TRUE);
+    if (sidebar->new_place_row != NULL)
+    {
+        nautilus_sidebar_row_hide (NAUTILUS_SIDEBAR_ROW (sidebar->new_place_row), TRUE);
+    }
 
     /* restore original selection */
     if (original_uri)
@@ -1519,7 +1543,8 @@ check_valid_drop_target (NautilusSidebar    *sidebar,
                   "file", &dest_file,
                   NULL);
 
-    if (place_type == NAUTILUS_SIDEBAR_ROW_NEW_BOOKMARK)
+    if (place_type == NAUTILUS_SIDEBAR_ROW_NEW_BOOKMARK ||
+        place_type == NAUTILUS_SIDEBAR_ROW_NEW_PLACE)
     {
         g_free (uri);
         return TRUE;
@@ -1603,29 +1628,10 @@ start_drop_feedback (NautilusSidebar *sidebar,
             file = nautilus_file_get (source_list->data);
             if (nautilus_file_is_directory (file))
             {
-                /* The XDG section is itself a drop target for "add to places",
-                 * so revealing the New Bookmark row while hovering it would
-                 * shift the list under the cursor and steal the drop. Only
-                 * arm the New Bookmark row when the cursor is over the
-                 * bookmarks section (or no specific row yet). */
-                gboolean reveal_new_bookmark = TRUE;
-
-                if (sidebar->hover_row != NULL &&
-                    NAUTILUS_IS_SIDEBAR_ROW (sidebar->hover_row))
+                nautilus_sidebar_row_reveal (NAUTILUS_SIDEBAR_ROW (sidebar->new_bookmark_row));
+                if (sidebar->new_place_row != NULL)
                 {
-                    NautilusSidebarSectionType hover_section_type = NAUTILUS_SIDEBAR_SECTION_INVALID;
-
-                    g_object_get (sidebar->hover_row,
-                                  "section-type", &hover_section_type, NULL);
-                    if (hover_section_type == NAUTILUS_SIDEBAR_SECTION_XDG_DIRS)
-                    {
-                        reveal_new_bookmark = FALSE;
-                    }
-                }
-
-                if (reveal_new_bookmark)
-                {
-                    nautilus_sidebar_row_reveal (NAUTILUS_SIDEBAR_ROW (sidebar->new_bookmark_row));
+                    nautilus_sidebar_row_reveal (NAUTILUS_SIDEBAR_ROW (sidebar->new_place_row));
                 }
             }
         }
@@ -1652,6 +1658,10 @@ stop_drop_feedback (NautilusSidebar *sidebar)
     {
         nautilus_sidebar_row_hide (NAUTILUS_SIDEBAR_ROW (sidebar->new_bookmark_row), FALSE);
         sidebar->drop_state = DROP_STATE_NORMAL;
+    }
+    if (sidebar->new_place_row != NULL)
+    {
+        nautilus_sidebar_row_hide (NAUTILUS_SIDEBAR_ROW (sidebar->new_place_row), FALSE);
     }
 
     if (sidebar->drag_row != NULL)
@@ -1938,11 +1948,10 @@ drag_drop_callback (GtkDropTarget   *target,
         {
             drop_files_as_bookmarks (sidebar, file_list, target_order_index);
         }
-        else if (target_section_type == NAUTILUS_SIDEBAR_SECTION_XDG_DIRS)
+        else if (target_place_type == NAUTILUS_SIDEBAR_ROW_NEW_PLACE)
         {
-            /* Folder drops over an XDG-section row are interpreted as a
-             * request to add the source folder to sidebar-places, mirroring
-             * how NEW_BOOKMARK works for the bookmarks section. */
+            /* Drop on the "Pin folder" affordance — append the source
+             * folders to sidebar-places. */
             for (GSList *l = file_list; l != NULL; l = l->next)
             {
                 GFile *f = G_FILE (l->data);
@@ -2051,6 +2060,10 @@ drag_leave_callback (GtkDropTarget *dest,
     {
         update_possible_drop_targets (sidebar, FALSE);
         nautilus_sidebar_row_hide (NAUTILUS_SIDEBAR_ROW (sidebar->new_bookmark_row), FALSE);
+        if (sidebar->new_place_row != NULL)
+        {
+            nautilus_sidebar_row_hide (NAUTILUS_SIDEBAR_ROW (sidebar->new_place_row), FALSE);
+        }
         sidebar->drop_state = DROP_STATE_NORMAL;
     }
 

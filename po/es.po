@@ -6507,6 +6507,71 @@ msgctxt "shortcuts dialog"
 msgid "Quit"
 msgstr "Salir"
 
+# === Nemo fork: cadenas añadidas por el fork ===
+# Solo las cadenas que NO existen ya en es.po (ni activas ni obsoletas)
+# se duplican aquí. Las que ya tienen traducción heredada del upstream se
+# benefician automáticamente.
+
+msgid "Pin folder"
+msgstr "Fijar carpeta"
+
+msgid "Add a folder to the pinned list"
+msgstr "Añadir una carpeta a la lista fija"
+
+msgid "This Computer"
+msgstr "Este equipo"
+
+msgid "Custom Actions"
+msgstr "Acciones personalizadas"
+
+msgid "Context Menu Actions"
+msgstr "Acciones del menú contextual"
+
+msgid "Built-in Items"
+msgstr "Elementos integrados"
+
+msgid "Sections"
+msgstr "Secciones"
+
+msgid "When you _Start Typing"
+msgstr "Al _empezar a teclear"
+
+msgid "Filter This Folder"
+msgstr "Filtrar esta carpeta"
+
+msgid "Jump to First Match"
+msgstr "Saltar a la primera coincidencia"
+
+msgid "Search Recursively"
+msgstr "Buscar en subcarpetas"
+
+msgid "Open in Window"
+msgstr "Abrir en ventana"
+
+msgid "Show all operations in a separate window"
+msgstr "Mostrar todas las operaciones en una ventana aparte"
+
+msgid "Resume"
+msgstr "Reanudar"
+
+msgid "Add an action"
+msgstr "Añadir una acción"
+
+msgid "Delete action?"
+msgstr "¿Eliminar acción?"
+
+msgid "The corresponding .nemo_action file will be removed permanently."
+msgstr "El fichero .nemo_action correspondiente se borrará de forma permanente."
+
+msgid "Menu label"
+msgstr "Etiqueta del menú"
+
+msgid "Show when"
+msgstr "Mostrar cuando"
+
+msgid "Submenu / Group (optional)"
+msgstr "Submenú / Grupo (opcional)"
+
 #, fuzzy
 #~ msgid "Show the package installer for unknown MIME types"
 #~ msgstr "Mostrar el instalador del paquete para tipos MIME desconocidos"
