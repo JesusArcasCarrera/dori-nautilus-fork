@@ -1067,10 +1067,12 @@ update_places (NautilusSidebar *sidebar)
                                                : g_uri_unescape_string (place_uri, NULL);
             icon_name = icon_name_for_sidebar_place (place_path);
             start_icon = g_themed_icon_new_with_default_fallbacks (icon_name);
+            /* order-index starts at 1 so the drag placeholder (index 0) can
+             * come first; lets the XDG rows be drag-reordered like bookmarks. */
             add_place (sidebar, NAUTILUS_SIDEBAR_ROW_BOOKMARK,
                        NAUTILUS_SIDEBAR_SECTION_XDG_DIRS,
                        place_name, start_icon, NULL, place_uri,
-                       NULL, NULL, NULL, NULL, 0,
+                       NULL, NULL, NULL, NULL, (int) i + 1,
                        place_tooltip);
             g_object_unref (start_icon);
         }
@@ -1561,11 +1563,19 @@ check_valid_drop_target (NautilusSidebar    *sidebar,
         }
     }
 
-    /* Dragging a bookmark? */
+    /* Dragging a bookmark / XDG place row? */
     if (G_VALUE_HOLDS (value, NAUTILUS_TYPE_SIDEBAR_ROW))
     {
-        /* Don't allow reordering bookmarks into non-bookmark areas */
-        valid = section_type == NAUTILUS_SIDEBAR_SECTION_BOOKMARKS;
+        NautilusSidebarRow *source_row = g_value_get_object (value);
+        NautilusSidebarSectionType source_section;
+
+        g_object_get (source_row, "section-type", &source_section, NULL);
+
+        /* Reordering only within the same reorderable section (bookmarks or
+         * the editable XDG/places list). */
+        valid = (section_type == source_section) &&
+                (section_type == NAUTILUS_SIDEBAR_SECTION_BOOKMARKS ||
+                 section_type == NAUTILUS_SIDEBAR_SECTION_XDG_DIRS);
     }
     else if (G_VALUE_HOLDS (value, GDK_TYPE_FILE_LIST))
     {
@@ -1734,7 +1744,13 @@ drag_motion_callback (GtkDropTarget   *target,
 
     if (G_VALUE_HOLDS (value, NAUTILUS_TYPE_SIDEBAR_ROW))
     {
-        /* Dragging bookmarks always moves them to another position in the bookmarks list */
+        NautilusSidebarRow *source_row = g_value_get_object (value);
+        NautilusSidebarSectionType source_section;
+
+        g_object_get (source_row, "section-type", &source_section, NULL);
+
+        /* Dragging a bookmark / XDG place always moves it to another position
+         * within its own section. */
         action = GDK_ACTION_MOVE;
         if (sidebar->row_placeholder == NULL)
         {
@@ -1744,6 +1760,10 @@ drag_motion_callback (GtkDropTarget   *target,
         {
             goto out;
         }
+
+        /* Keep the placeholder in the same section as the dragged row so the
+         * sort func positions it correctly (bookmarks or XDG places). */
+        g_object_set (sidebar->row_placeholder, "section-type", source_section, NULL);
 
         if (gtk_widget_get_parent (sidebar->row_placeholder) != NULL)
         {
@@ -1852,6 +1872,78 @@ reorder_bookmarks (NautilusSidebar    *sidebar,
     nautilus_bookmark_list_move_item (sidebar->bookmark_list, location, new_position);
 }
 
+/* Persist a new order for the XDG/places section after a drag-reorder. The new
+ * order is read straight from the current visual order of the XDG rows: the
+ * drag placeholder marks where the dragged row lands, the original (hidden)
+ * source row is skipped, and the "Pin folder" affordance is ignored. */
+static void
+reorder_places (NautilusSidebar    *sidebar,
+                NautilusSidebarRow *source_row)
+{
+    g_autofree char *source_uri = NULL;
+    g_autoptr (GPtrArray) order = g_ptr_array_new_with_free_func (g_free);
+    gboolean placed = FALSE;
+
+    g_object_get (source_row, "uri", &source_uri, NULL);
+    if (source_uri == NULL)
+    {
+        return;
+    }
+
+    for (GtkWidget *row = gtk_widget_get_first_child (GTK_WIDGET (sidebar->list_box));
+         row != NULL;
+         row = gtk_widget_get_next_sibling (row))
+    {
+        NautilusSidebarSectionType section_type;
+        NautilusSidebarRowType place_type;
+        g_autofree char *uri = NULL;
+
+        if (!NAUTILUS_IS_SIDEBAR_ROW (row))
+        {
+            continue;
+        }
+
+        g_object_get (row,
+                      "section-type", &section_type,
+                      "place-type", &place_type,
+                      "uri", &uri,
+                      NULL);
+
+        if (section_type != NAUTILUS_SIDEBAR_SECTION_XDG_DIRS)
+        {
+            continue;
+        }
+
+        if (place_type == NAUTILUS_SIDEBAR_ROW_BOOKMARK_PLACEHOLDER)
+        {
+            /* Where the dragged row lands. */
+            g_ptr_array_add (order, g_strdup (source_uri));
+            placed = TRUE;
+        }
+        else if (NAUTILUS_SIDEBAR_ROW (row) == source_row)
+        {
+            continue; /* Original position of the dragged row. */
+        }
+        else if (place_type == NAUTILUS_SIDEBAR_ROW_BOOKMARK && uri != NULL)
+        {
+            g_ptr_array_add (order, g_strdup (uri));
+        }
+        /* NAUTILUS_SIDEBAR_ROW_NEW_PLACE ("Pin folder") is skipped. */
+    }
+
+    /* Safety: if no placeholder was seen, keep the dragged entry. */
+    if (!placed)
+    {
+        g_ptr_array_add (order, g_strdup (source_uri));
+    }
+
+    g_ptr_array_add (order, NULL);
+
+    g_settings_set_strv (nautilus_preferences,
+                         NAUTILUS_PREFERENCES_SIDEBAR_PLACES,
+                         (const char * const *) order->pdata);
+}
+
 /* Creates bookmarks for the specified files at the given position in the bookmarks list */
 static void
 drop_files_as_bookmarks (NautilusSidebar *sidebar,
@@ -1920,20 +2012,29 @@ drag_drop_callback (GtkDropTarget   *target,
     if (G_VALUE_HOLDS (value, NAUTILUS_TYPE_SIDEBAR_ROW))
     {
         GtkWidget *source_row;
-        /* A bookmark got reordered */
-        if (target_section_type != NAUTILUS_SIDEBAR_SECTION_BOOKMARKS)
+        /* A bookmark or XDG place got reordered */
+        if (target_section_type != NAUTILUS_SIDEBAR_SECTION_BOOKMARKS &&
+            target_section_type != NAUTILUS_SIDEBAR_SECTION_XDG_DIRS)
         {
             goto out;
         }
 
         source_row = g_value_get_object (value);
 
-        if (sidebar->row_placeholder != NULL)
+        if (target_section_type == NAUTILUS_SIDEBAR_SECTION_XDG_DIRS)
         {
-            g_object_get (sidebar->row_placeholder, "order-index", &target_order_index, NULL);
+            /* Persist the new order from the current visual layout. */
+            reorder_places (sidebar, NAUTILUS_SIDEBAR_ROW (source_row));
         }
+        else
+        {
+            if (sidebar->row_placeholder != NULL)
+            {
+                g_object_get (sidebar->row_placeholder, "order-index", &target_order_index, NULL);
+            }
 
-        reorder_bookmarks (sidebar, NAUTILUS_SIDEBAR_ROW (source_row), target_order_index);
+            reorder_bookmarks (sidebar, NAUTILUS_SIDEBAR_ROW (source_row), target_order_index);
+        }
         result = TRUE;
     }
     else if (G_VALUE_HOLDS (value, GDK_TYPE_FILE_LIST))
@@ -3612,13 +3713,19 @@ on_row_pressed (GtkGestureClick    *gesture,
 {
     NautilusSidebar *sidebar;
     NautilusSidebarSectionType section_type;
+    NautilusSidebarRowType place_type;
 
     g_object_get (row,
                   "sidebar", &sidebar,
                   "section_type", &section_type,
+                  "place-type", &place_type,
                   NULL);
 
-    if (section_type == NAUTILUS_SIDEBAR_SECTION_BOOKMARKS)
+    /* Bookmarks and the editable XDG/places rows can be drag-reordered. The
+     * "Pin folder" affordance (NEW_PLACE) is not a real place, so skip it. */
+    if (section_type == NAUTILUS_SIDEBAR_SECTION_BOOKMARKS ||
+        (section_type == NAUTILUS_SIDEBAR_SECTION_XDG_DIRS &&
+         place_type == NAUTILUS_SIDEBAR_ROW_BOOKMARK))
     {
         sidebar->drag_row = GTK_WIDGET (row);
         sidebar->drag_row_x = (int) x;
