@@ -9,38 +9,51 @@
 #include <glib/gi18n.h>
 
 #include "nautilus-application.h"
+#include "nautilus-global-preferences.h"
 #include "nautilus-list-base-private.h"
+#include "nautilus-recent-servers.h"
 #include "nautilus-scheme.h"
 #include "nautilus-view-model.h"
 
 /*
  * NautilusOtherLocationsView
  *
- * Cards-based view that backs `other-locations:///`. Despite being a subclass of
- * NautilusListBase (so that NautilusFilesView can host it through its existing
- * dispatch path), the visible content is built independently from the directory
- * model: drives, volumes and mounts are read directly from GVolumeMonitor and
- * rendered as two flow-boxes — "This Computer" for native mountables and
- * "Network" for remote ones.
+ * View that backs `other-locations:///`, rendered as a Windows "This PC"-style
+ * grid of drive tiles:
  *
- * The base model still exists (otherwise NautilusFilesView misbehaves) but its
- * contents are not displayed.
+ *     [icon]  Name
+ *             /real/path
+ *     [███████      ]  used / total   (only when mounted)
+ *
+ * The tiles flow horizontally and wrap. Content is read straight from
+ * GVolumeMonitor and grouped into "This Computer" (native mountables) and
+ * "Network" (remote ones). It subclasses NautilusListBase only so
+ * NautilusFilesView can host it; the "Connect to Server" bar is provided by
+ * the window-level network address bar (shown for other-locations:///).
  */
 
-#define CARD_ICON_SIZE 48
+#define TILE_ICON_SIZE 48
+#define TILE_WIDTH     280
 
 struct _NautilusOtherLocationsView
 {
     NautilusListBase parent_instance;
 
     GtkBox      *content_box;
-    GtkLabel    *this_computer_label;
+    GtkWidget   *this_computer_label;
     GtkFlowBox  *this_computer_box;
-    GtkLabel    *network_label;
+    GtkWidget   *network_label;
     GtkFlowBox  *network_box;
 
     GVolumeMonitor *volume_monitor;
     guint           rebuild_idle_id;
+
+    /* Async enumeration of network:/// peers for the Networks section. */
+    GCancellable   *network_cancellable;
+
+    /* Previously connected servers (same source as the Network view's
+     * "Previous" group). */
+    NautilusRecentServers *recent_servers;
 };
 
 G_DEFINE_TYPE (NautilusOtherLocationsView, nautilus_other_locations_view, NAUTILUS_TYPE_LIST_BASE)
@@ -77,7 +90,7 @@ static void
 real_set_zoom_level (NautilusListBase *list_base,
                      int               new_level)
 {
-    /* No-op: the cards view doesn't expose user-controlled zoom. */
+    /* No-op: the tiles view doesn't expose user-controlled zoom. */
 }
 
 static GVariant *
@@ -97,7 +110,7 @@ static void
 real_set_enable_rubberband (NautilusListBase *list_base,
                             gboolean          enabled)
 {
-    /* No-op: there's no rubberband on a flowbox of cards. */
+    /* No-op: there's no rubberband on a flowbox of tiles. */
 }
 
 static void
@@ -125,49 +138,49 @@ real_popup_background_context_menu (NautilusListBase *self,
     g_signal_stop_emission_by_name (G_OBJECT (self), "popup-background-context-menu");
 }
 
-/* ---------- Card construction ---------- */
+/* ---------- Tile construction ---------- */
 
 typedef struct
 {
     NautilusOtherLocationsView *self;
     GFile                      *location;
-} CardActivateData;
+} TileActivateData;
 
 static void
-card_activate_data_free (gpointer data)
+tile_activate_data_free (gpointer data)
 {
-    CardActivateData *cd = data;
+    TileActivateData *td = data;
 
-    g_clear_object (&cd->location);
-    g_free (cd);
+    g_clear_object (&td->location);
+    g_free (td);
 }
 
 static void
-on_card_clicked (GtkButton *button,
+on_tile_clicked (GtkButton *button,
                  gpointer   user_data)
 {
-    CardActivateData *cd = user_data;
+    TileActivateData *td = user_data;
     NautilusApplication *app = NAUTILUS_APPLICATION (g_application_get_default ());
 
-    if (cd->location == NULL)
+    if (td->location == NULL)
     {
         return;
     }
 
-    nautilus_application_open_location_full (app, cd->location, 0, NULL, NULL);
+    nautilus_application_open_location_full (app, td->location, 0, NULL, NULL);
 }
 
 static gboolean
 query_filesystem_usage (GFile   *root,
                         guint64 *out_total,
-                        guint64 *out_free)
+                        guint64 *out_used)
 {
     /* g_file_query_filesystem_info() can block on remote mounts. We only ever
      * call this for native (local) roots. */
     g_autoptr (GError) error = NULL;
     g_autoptr (GFileInfo) info = g_file_query_filesystem_info (
         root,
-        G_FILE_ATTRIBUTE_FILESYSTEM_SIZE "," G_FILE_ATTRIBUTE_FILESYSTEM_FREE,
+        G_FILE_ATTRIBUTE_FILESYSTEM_SIZE "," G_FILE_ATTRIBUTE_FILESYSTEM_USED,
         NULL, &error);
 
     if (info == NULL)
@@ -176,43 +189,61 @@ query_filesystem_usage (GFile   *root,
     }
 
     if (!g_file_info_has_attribute (info, G_FILE_ATTRIBUTE_FILESYSTEM_SIZE) ||
-        !g_file_info_has_attribute (info, G_FILE_ATTRIBUTE_FILESYSTEM_FREE))
+        !g_file_info_has_attribute (info, G_FILE_ATTRIBUTE_FILESYSTEM_USED))
     {
         return FALSE;
     }
 
     *out_total = g_file_info_get_attribute_uint64 (info, G_FILE_ATTRIBUTE_FILESYSTEM_SIZE);
-    *out_free = g_file_info_get_attribute_uint64 (info, G_FILE_ATTRIBUTE_FILESYSTEM_FREE);
+    *out_used = g_file_info_get_attribute_uint64 (info, G_FILE_ATTRIBUTE_FILESYSTEM_USED);
     return TRUE;
 }
 
+/*
+ * Build a Windows-style tile:
+ *
+ *   [icon]  Name
+ *           real path
+ *   [bar]   used / total
+ *
+ * @location is the navigation target (NULL → inert tile). @path_label is the
+ * real path / device (omitted when empty). Capacity is shown only when
+ * @total > 0 (i.e. the volume is mounted).
+ */
 static GtkWidget *
-build_card (NautilusOtherLocationsView *self,
+build_tile (NautilusOtherLocationsView *self,
             const char                 *name,
             const char                 *path_label,
             GIcon                      *icon,
             GFile                      *location,
-            gboolean                    is_native_and_mounted)
+            guint64                     total,
+            guint64                     used)
 {
-    /* Use a GtkButton as the card so it gets keyboard activation and the
-     * "card" + "flat" libadwaita styling without us having to redo any of it. */
-    GtkWidget *card = gtk_button_new ();
-    gtk_widget_add_css_class (card, "card");
-    gtk_widget_add_css_class (card, "activatable");
-    gtk_widget_set_size_request (card, 220, -1);
-    gtk_widget_set_hexpand (card, FALSE);
-    gtk_widget_set_vexpand (card, FALSE);
+    /* A GtkButton gives keyboard activation and the "card" libadwaita styling
+     * for free. */
+    GtkWidget *tile = gtk_button_new ();
+    gtk_widget_add_css_class (tile, "card");
+    gtk_widget_add_css_class (tile, "activatable");
+    gtk_widget_set_size_request (tile, TILE_WIDTH, -1);
+    gtk_widget_set_hexpand (tile, FALSE);
+    gtk_widget_set_vexpand (tile, FALSE);
+    gtk_widget_set_valign (tile, GTK_ALIGN_START);
+
+    /* Sort keys read back by the flowbox sort func: mounted (navigable) tiles
+     * first, then alphabetical by name. */
+    g_object_set_data (G_OBJECT (tile), "sort-mounted", GINT_TO_POINTER (location != NULL));
+    g_object_set_data_full (G_OBJECT (tile), "sort-name", g_strdup (name), g_free);
 
     GtkWidget *box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 6);
-    gtk_widget_set_margin_top (box, 12);
-    gtk_widget_set_margin_bottom (box, 12);
+    gtk_widget_set_margin_top (box, 10);
+    gtk_widget_set_margin_bottom (box, 10);
     gtk_widget_set_margin_start (box, 12);
     gtk_widget_set_margin_end (box, 12);
-    gtk_button_set_child (GTK_BUTTON (card), box);
+    gtk_button_set_child (GTK_BUTTON (tile), box);
 
-    /* Icon. Fallback to a generic disk symbol when the volume/mount didn't
-     * provide one. The temporary GIcon is owned via g_autoptr so it doesn't
-     * leak when gtk_image_new_from_gicon() takes its own ref. */
+    /* --- Top: [icon]  name / path  --- */
+    GtkWidget *head = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 12);
+
     g_autoptr (GIcon) fallback_icon = NULL;
     GIcon *effective_icon = icon;
 
@@ -223,125 +254,136 @@ build_card (NautilusOtherLocationsView *self,
     }
 
     GtkWidget *image = gtk_image_new_from_gicon (effective_icon);
-    gtk_image_set_pixel_size (GTK_IMAGE (image), CARD_ICON_SIZE);
-    gtk_widget_set_halign (image, GTK_ALIGN_CENTER);
-    gtk_box_append (GTK_BOX (box), image);
+    gtk_image_set_pixel_size (GTK_IMAGE (image), TILE_ICON_SIZE);
+    gtk_widget_set_valign (image, GTK_ALIGN_CENTER);
+    gtk_box_append (GTK_BOX (head), image);
 
-    /* Name. */
+    /* Name on top, real path right below it, stacked next to the icon. */
+    GtkWidget *text = gtk_box_new (GTK_ORIENTATION_VERTICAL, 2);
+    gtk_widget_set_valign (text, GTK_ALIGN_CENTER);
+    gtk_widget_set_hexpand (text, TRUE);
+
     GtkWidget *name_label = gtk_label_new (name);
     gtk_widget_add_css_class (name_label, "heading");
+    gtk_label_set_xalign (GTK_LABEL (name_label), 0.0);
     gtk_label_set_ellipsize (GTK_LABEL (name_label), PANGO_ELLIPSIZE_END);
-    gtk_label_set_xalign (GTK_LABEL (name_label), 0.5);
-    gtk_label_set_max_width_chars (GTK_LABEL (name_label), 22);
-    gtk_box_append (GTK_BOX (box), name_label);
+    gtk_box_append (GTK_BOX (text), name_label);
 
-    /* Path / subtitle. */
     if (path_label != NULL && *path_label != '\0')
     {
         GtkWidget *path_lbl = gtk_label_new (path_label);
         gtk_widget_add_css_class (path_lbl, "dim-label");
         gtk_widget_add_css_class (path_lbl, "caption");
+        gtk_label_set_xalign (GTK_LABEL (path_lbl), 0.0);
         gtk_label_set_ellipsize (GTK_LABEL (path_lbl), PANGO_ELLIPSIZE_MIDDLE);
-        gtk_label_set_xalign (GTK_LABEL (path_lbl), 0.5);
-        gtk_label_set_max_width_chars (GTK_LABEL (path_lbl), 24);
-        gtk_box_append (GTK_BOX (box), path_lbl);
+        gtk_box_append (GTK_BOX (text), path_lbl);
     }
 
-    /* Progress bar + size only for mounted native mounts where we can query
-     * the filesystem cheaply. */
-    if (is_native_and_mounted && location != NULL)
+    gtk_box_append (GTK_BOX (head), text);
+    gtk_box_append (GTK_BOX (box), head);
+
+    /* --- Capacity: thin bar + "used / total" on one compact line, only when
+     *     mounted (total known) --- */
+    if (total > 0)
     {
-        guint64 total = 0;
-        guint64 free_b = 0;
+        double fraction = (double) used / (double) total;
 
-        if (query_filesystem_usage (location, &total, &free_b) && total > 0)
-        {
-            guint64 used = (free_b > total) ? 0 : total - free_b;
-            double fraction = (double) used / (double) total;
+        GtkWidget *cap_row = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
 
-            GtkWidget *bar = gtk_progress_bar_new ();
-            gtk_progress_bar_set_fraction (GTK_PROGRESS_BAR (bar), fraction);
-            gtk_widget_set_margin_top (bar, 4);
-            gtk_box_append (GTK_BOX (box), bar);
+        GtkWidget *bar = gtk_progress_bar_new ();
+        gtk_progress_bar_set_fraction (GTK_PROGRESS_BAR (bar), CLAMP (fraction, 0.0, 1.0));
+        gtk_widget_set_hexpand (bar, TRUE);
+        gtk_widget_set_valign (bar, GTK_ALIGN_CENTER);
+        gtk_widget_add_css_class (bar, "otherlocations-usage");
+        gtk_box_append (GTK_BOX (cap_row), bar);
 
-            g_autofree char *free_str = g_format_size (free_b);
-            g_autofree char *total_str = g_format_size (total);
-            /* Translators: "<free> free of <total>" on a drive card. */
-            g_autofree char *usage_str = g_strdup_printf (_("%s free of %s"),
-                                                          free_str, total_str);
-            GtkWidget *usage_lbl = gtk_label_new (usage_str);
-            gtk_widget_add_css_class (usage_lbl, "dim-label");
-            gtk_widget_add_css_class (usage_lbl, "caption");
-            gtk_label_set_xalign (GTK_LABEL (usage_lbl), 0.5);
-            gtk_box_append (GTK_BOX (box), usage_lbl);
-        }
+        g_autofree char *used_str = g_format_size (used);
+        g_autofree char *total_str = g_format_size (total);
+        /* Translators: "<used> / <total>" capacity on a drive tile. */
+        g_autofree char *cap_str = g_strdup_printf (_("%s / %s"), used_str, total_str);
+        GtkWidget *cap_lbl = gtk_label_new (cap_str);
+        gtk_widget_add_css_class (cap_lbl, "dim-label");
+        gtk_widget_add_css_class (cap_lbl, "numeric");
+        gtk_widget_add_css_class (cap_lbl, "caption");
+        gtk_label_set_xalign (GTK_LABEL (cap_lbl), 1.0);
+        gtk_box_append (GTK_BOX (cap_row), cap_lbl);
+
+        gtk_box_append (GTK_BOX (box), cap_row);
     }
 
     /* Click → navigate. Disable activation when there's nowhere to go. */
     if (location != NULL)
     {
-        CardActivateData *cd = g_new0 (CardActivateData, 1);
-        cd->self = self;
-        cd->location = g_object_ref (location);
-        g_signal_connect_data (card, "clicked",
-                               G_CALLBACK (on_card_clicked), cd,
-                               (GClosureNotify) card_activate_data_free,
+        TileActivateData *td = g_new0 (TileActivateData, 1);
+        td->self = self;
+        td->location = g_object_ref (location);
+        g_signal_connect_data (tile, "clicked",
+                               G_CALLBACK (on_tile_clicked), td,
+                               (GClosureNotify) tile_activate_data_free,
                                G_CONNECT_DEFAULT);
     }
     else
     {
-        gtk_widget_set_sensitive (card, FALSE);
+        gtk_widget_set_sensitive (tile, FALSE);
     }
 
-    return card;
+    return tile;
 }
 
-/* ---------- Volume monitor → cards ---------- */
+/* ---------- Volume monitor → tiles ---------- */
 
 static void
-add_mount_card (NautilusOtherLocationsView *self,
+add_mount_tile (NautilusOtherLocationsView *self,
                 GMount                     *mount)
 {
     g_autofree char *name = g_mount_get_name (mount);
     g_autoptr (GIcon) icon = g_mount_get_symbolic_icon (mount);
-    g_autoptr (GFile) root = g_mount_get_root (mount);
+    g_autoptr (GFile) root = g_mount_get_default_location (mount);
     gboolean is_native = g_file_is_native (root);
     g_autofree char *path = NULL;
+    guint64 total = 0;
+    guint64 used = 0;
+
+    /* The Networks section can be turned off independently from the sidebar
+     * Network entry. */
+    if (!is_native &&
+        !g_settings_get_boolean (nautilus_preferences,
+                                 NAUTILUS_PREFERENCES_OTHER_LOCATIONS_SHOW_NETWORK))
+    {
+        return;
+    }
 
     if (is_native)
     {
         path = g_file_get_path (root);
+        query_filesystem_usage (root, &total, &used);
     }
     else
     {
         path = g_file_get_uri (root);
     }
 
-    GtkWidget *card = build_card (self, name, path, icon, root, is_native);
-
+    GtkWidget *tile = build_tile (self, name, path, icon, root, total, used);
     GtkFlowBox *target = is_native ? self->this_computer_box : self->network_box;
-    gtk_flow_box_append (target, card);
+
+    gtk_flow_box_append (target, tile);
 }
 
 static void
-add_volume_unmounted_card (NautilusOtherLocationsView *self,
+add_unmounted_volume_tile (NautilusOtherLocationsView *self,
                            GVolume                    *volume,
                            gboolean                    is_native_hint)
 {
     g_autofree char *name = g_volume_get_name (volume);
     g_autoptr (GIcon) icon = g_volume_get_symbolic_icon (volume);
+    /* Device node (e.g. /dev/sda1) stands in for the real path while the
+     * volume is unmounted. */
+    g_autofree char *device = g_volume_get_identifier (volume, G_VOLUME_IDENTIFIER_KIND_UNIX_DEVICE);
 
-    /* Unmounted volumes don't have a usable GFile location for navigation. We
-     * still show them as informational cards. */
-    GtkWidget *card = build_card (self,
-                                  name,
-                                  _("Not mounted"),
-                                  icon,
-                                  NULL,
-                                  FALSE);
-
+    GtkWidget *tile = build_tile (self, name, device, icon, NULL, 0, 0);
     GtkFlowBox *target = is_native_hint ? self->this_computer_box : self->network_box;
-    gtk_flow_box_append (target, card);
+
+    gtk_flow_box_append (target, tile);
 }
 
 static gboolean
@@ -368,8 +410,155 @@ clear_flowbox (GtkFlowBox *box)
 }
 
 static void
-rebuild_cards (NautilusOtherLocationsView *self)
+update_section_visibility (NautilusOtherLocationsView *self)
 {
+    gboolean has_local = (gtk_widget_get_first_child (GTK_WIDGET (self->this_computer_box)) != NULL);
+    gboolean has_network = (gtk_widget_get_first_child (GTK_WIDGET (self->network_box)) != NULL);
+
+    gtk_widget_set_visible (self->this_computer_label, has_local);
+    gtk_widget_set_visible (GTK_WIDGET (self->this_computer_box), has_local);
+    gtk_widget_set_visible (self->network_label, has_network);
+    gtk_widget_set_visible (GTK_WIDGET (self->network_box), has_network);
+}
+
+/* Async enumeration of network:/// → network location tiles (LAN peers,
+ * "Windows Network", …). Self is kept alive by a ref for the operation's
+ * lifetime; the captured cancellable is cancelled on rebuild/dispose. */
+typedef struct
+{
+    NautilusOtherLocationsView *self;
+    GCancellable               *cancellable;
+    GFileEnumerator            *enumerator;
+} NetEnum;
+
+static void
+net_enum_free (NetEnum *ne)
+{
+    g_clear_object (&ne->enumerator);
+    g_clear_object (&ne->cancellable);
+    g_clear_object (&ne->self);
+    g_free (ne);
+}
+
+static void
+on_net_next (GObject      *source,
+             GAsyncResult *res,
+             gpointer      data)
+{
+    NetEnum *ne = data;
+    g_autoptr (GError) error = NULL;
+    GList *infos = g_file_enumerator_next_files_finish (ne->enumerator, res, &error);
+
+    if (g_cancellable_is_cancelled (ne->cancellable))
+    {
+        g_list_free_full (infos, g_object_unref);
+        net_enum_free (ne);
+        return;
+    }
+
+    for (GList *l = infos; l != NULL; l = l->next)
+    {
+        GFileInfo *info = l->data;
+        const char *display_name = g_file_info_get_display_name (info);
+        GIcon *icon = g_file_info_get_symbolic_icon (info);
+        g_autoptr (GFile) child = g_file_enumerator_get_child (ne->enumerator, info);
+
+        GtkWidget *tile = build_tile (ne->self, display_name, NULL, icon, child, 0, 0);
+        gtk_flow_box_append (ne->self->network_box, tile);
+    }
+
+    gboolean had_items = (infos != NULL);
+    g_list_free_full (infos, g_object_unref);
+
+    if (had_items)
+    {
+        g_file_enumerator_next_files_async (ne->enumerator, 32, G_PRIORITY_DEFAULT,
+                                            ne->cancellable, on_net_next, ne);
+        return;
+    }
+
+    update_section_visibility (ne->self);
+    net_enum_free (ne);
+}
+
+static void
+on_net_enumerate (GObject      *source,
+                  GAsyncResult *res,
+                  gpointer      data)
+{
+    NetEnum *ne = data;
+    g_autoptr (GError) error = NULL;
+    GFileEnumerator *enumerator = g_file_enumerate_children_finish (G_FILE (source), res, &error);
+
+    if (enumerator == NULL || g_cancellable_is_cancelled (ne->cancellable))
+    {
+        g_clear_object (&enumerator);
+        net_enum_free (ne);
+        return;
+    }
+
+    ne->enumerator = enumerator;
+    g_file_enumerator_next_files_async (ne->enumerator, 32, G_PRIORITY_DEFAULT,
+                                        ne->cancellable, on_net_next, ne);
+}
+
+static void
+start_network_enumeration (NautilusOtherLocationsView *self)
+{
+    g_autoptr (GFile) net = g_file_new_for_uri (SCHEME_NETWORK ":///");
+    NetEnum *ne = g_new0 (NetEnum, 1);
+
+    self->network_cancellable = g_cancellable_new ();
+    ne->self = g_object_ref (self);
+    ne->cancellable = g_object_ref (self->network_cancellable);
+
+    g_file_enumerate_children_async (
+        net,
+        G_FILE_ATTRIBUTE_STANDARD_NAME ","
+        G_FILE_ATTRIBUTE_STANDARD_DISPLAY_NAME ","
+        G_FILE_ATTRIBUTE_STANDARD_SYMBOLIC_ICON ","
+        G_FILE_ATTRIBUTE_STANDARD_TARGET_URI,
+        G_FILE_QUERY_INFO_NONE, G_PRIORITY_DEFAULT,
+        ne->cancellable, on_net_enumerate, ne);
+}
+
+/* Previously connected servers (FTP/SMB/WebDAV…), the "Previous" group in the
+ * Network view. */
+static void
+add_recent_server_tiles (NautilusOtherLocationsView *self)
+{
+    GList *infos = nautilus_recent_servers_get_infos (self->recent_servers);
+
+    for (GList *l = infos; l != NULL; l = l->next)
+    {
+        GFileInfo *info = l->data;
+        const char *display_name = g_file_info_get_display_name (info);
+        const char *uri = g_file_info_get_attribute_string (info, G_FILE_ATTRIBUTE_STANDARD_TARGET_URI);
+        GIcon *icon = g_file_info_get_symbolic_icon (info);
+
+        if (uri == NULL)
+        {
+            continue;
+        }
+
+        g_autoptr (GFile) target = g_file_new_for_uri (uri);
+        const char *title = (display_name != NULL && *display_name != '\0' &&
+                             g_strcmp0 (display_name, "/") != 0) ? display_name : uri;
+        GtkWidget *tile = build_tile (self, title, uri, icon, target, 0, 0);
+
+        gtk_flow_box_append (self->network_box, tile);
+    }
+
+    g_list_free_full (infos, g_object_unref);
+}
+
+static void
+rebuild_tiles (NautilusOtherLocationsView *self)
+{
+    /* Abort any in-flight network enumeration from a previous rebuild. */
+    g_cancellable_cancel (self->network_cancellable);
+    g_clear_object (&self->network_cancellable);
+
     clear_flowbox (self->this_computer_box);
     clear_flowbox (self->network_box);
 
@@ -388,13 +577,12 @@ rebuild_cards (NautilusOtherLocationsView *self)
 
         if (volumes == NULL)
         {
-            /* Drive without any volume (e.g. empty optical tray). Render a
-             * placeholder card on the local side. */
+            /* Drive without any volume (e.g. empty optical tray). */
             g_autofree char *name = g_drive_get_name (drive);
             g_autoptr (GIcon) icon = g_drive_get_symbolic_icon (drive);
-            GtkWidget *card = build_card (self, name, _("No media"), icon, NULL, FALSE);
+            GtkWidget *tile = build_tile (self, name, _("No media"), icon, NULL, 0, 0);
 
-            gtk_flow_box_append (self->this_computer_box, card);
+            gtk_flow_box_append (self->this_computer_box, tile);
         }
 
         for (GList *v = volumes; v != NULL; v = v->next)
@@ -406,14 +594,14 @@ rebuild_cards (NautilusOtherLocationsView *self)
             {
                 if (!mount_already_added (seen_mounts, mount))
                 {
-                    add_mount_card (self, mount);
+                    add_mount_tile (self, mount);
                 }
             }
             else
             {
                 /* Native is a best guess based on the drive; reasonable for
                  * the local-vs-network split. */
-                add_volume_unmounted_card (self, vol, TRUE);
+                add_unmounted_volume_tile (self, vol, TRUE);
             }
         }
         g_list_free_full (volumes, g_object_unref);
@@ -437,14 +625,14 @@ rebuild_cards (NautilusOtherLocationsView *self)
         {
             if (!mount_already_added (seen_mounts, mount))
             {
-                add_mount_card (self, mount);
+                add_mount_tile (self, mount);
             }
         }
         else
         {
             /* No drive, no mount: cannot tell native vs remote reliably.
              * Default to local. */
-            add_volume_unmounted_card (self, vol, TRUE);
+            add_unmounted_volume_tile (self, vol, TRUE);
         }
     }
     g_list_free_full (volumes, g_object_unref);
@@ -465,19 +653,24 @@ rebuild_cards (NautilusOtherLocationsView *self)
         {
             continue;
         }
-        add_mount_card (self, mount);
+        add_mount_tile (self, mount);
     }
     g_list_free_full (mounts, g_object_unref);
 
     /* Hide each section that ended up empty so we don't display orphan
-     * headers. */
-    gboolean has_local = (gtk_widget_get_first_child (GTK_WIDGET (self->this_computer_box)) != NULL);
-    gboolean has_network = (gtk_widget_get_first_child (GTK_WIDGET (self->network_box)) != NULL);
+     * headers. (Re-evaluated again when async network peers arrive.) */
+    update_section_visibility (self);
 
-    gtk_widget_set_visible (GTK_WIDGET (self->this_computer_label), has_local);
-    gtk_widget_set_visible (GTK_WIDGET (self->this_computer_box), has_local);
-    gtk_widget_set_visible (GTK_WIDGET (self->network_label), has_network);
-    gtk_widget_set_visible (GTK_WIDGET (self->network_box), has_network);
+    /* Network locations (LAN peers, Windows network, …) are listed via an
+     * async enumeration of network:///, gated by the same preference that
+     * controls remote mounts and the server bar. */
+    if (g_settings_get_boolean (nautilus_preferences,
+                                NAUTILUS_PREFERENCES_OTHER_LOCATIONS_SHOW_NETWORK))
+    {
+        add_recent_server_tiles (self);
+        update_section_visibility (self);
+        start_network_enumeration (self);
+    }
 }
 
 static gboolean
@@ -486,7 +679,7 @@ rebuild_idle_cb (gpointer user_data)
     NautilusOtherLocationsView *self = user_data;
 
     self->rebuild_idle_id = 0;
-    rebuild_cards (self);
+    rebuild_tiles (self);
     return G_SOURCE_REMOVE;
 }
 
@@ -523,6 +716,15 @@ nautilus_other_locations_view_dispose (GObject *object)
         self->rebuild_idle_id = 0;
     }
 
+    g_cancellable_cancel (self->network_cancellable);
+    g_clear_object (&self->network_cancellable);
+
+    if (self->recent_servers != NULL)
+    {
+        g_signal_handlers_disconnect_by_data (self->recent_servers, self);
+        g_clear_object (&self->recent_servers);
+    }
+
     if (self->volume_monitor != NULL)
     {
         g_signal_handlers_disconnect_by_data (self->volume_monitor, self);
@@ -551,16 +753,38 @@ nautilus_other_locations_view_class_init (NautilusOtherLocationsViewClass *klass
     list_base_class->popup_background_context_menu = real_popup_background_context_menu;
 }
 
-static GtkLabel *
+static GtkWidget *
 make_section_label (const char *text)
 {
     GtkWidget *label = gtk_label_new (text);
 
-    gtk_widget_add_css_class (label, "title-2");
+    gtk_widget_add_css_class (label, "heading");
     gtk_label_set_xalign (GTK_LABEL (label), 0.0);
-    gtk_widget_set_margin_top (label, 12);
+    gtk_widget_set_margin_top (label, 6);
     gtk_widget_set_margin_bottom (label, 6);
-    return GTK_LABEL (label);
+    return label;
+}
+
+/* Order tiles: mounted (navigable) first, then alphabetical by name. */
+static int
+sort_tiles (GtkFlowBoxChild *a,
+            GtkFlowBoxChild *b,
+            gpointer         user_data)
+{
+    GtkWidget *ta = gtk_flow_box_child_get_child (a);
+    GtkWidget *tb = gtk_flow_box_child_get_child (b);
+    int ma = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (ta), "sort-mounted"));
+    int mb = GPOINTER_TO_INT (g_object_get_data (G_OBJECT (tb), "sort-mounted"));
+
+    if (ma != mb)
+    {
+        return mb - ma; /* mounted (1) before unmounted (0) */
+    }
+
+    const char *na = g_object_get_data (G_OBJECT (ta), "sort-name");
+    const char *nb = g_object_get_data (G_OBJECT (tb), "sort-name");
+
+    return g_utf8_collate (na != NULL ? na : "", nb != NULL ? nb : "");
 }
 
 static GtkFlowBox *
@@ -574,7 +798,8 @@ make_flow_box (void)
     gtk_flow_box_set_row_spacing (GTK_FLOW_BOX (box), 12);
     gtk_flow_box_set_min_children_per_line (GTK_FLOW_BOX (box), 1);
     gtk_flow_box_set_max_children_per_line (GTK_FLOW_BOX (box), 12);
-    gtk_widget_set_halign (box, GTK_ALIGN_FILL);
+    gtk_flow_box_set_sort_func (GTK_FLOW_BOX (box), sort_tiles, NULL, NULL);
+    gtk_widget_set_halign (box, GTK_ALIGN_START);
     return GTK_FLOW_BOX (box);
 }
 
@@ -585,9 +810,29 @@ nautilus_other_locations_view_init (NautilusOtherLocationsView *self)
 
     gtk_widget_add_css_class (GTK_WIDGET (self), "nautilus-other-locations-view");
 
+    /* Thin usage bar (the default progressbar trough is too tall for a tile).
+     * Installed once per display. */
+    static gsize css_once = 0;
+    if (g_once_init_enter (&css_once))
+    {
+        g_autoptr (GtkCssProvider) provider = gtk_css_provider_new ();
+        gtk_css_provider_load_from_string (
+            provider,
+            "progressbar.otherlocations-usage,"
+            "progressbar.otherlocations-usage > trough,"
+            "progressbar.otherlocations-usage > trough > progress {"
+            "  min-height: 4px;"
+            "}");
+        gtk_style_context_add_provider_for_display (
+            gdk_display_get_default (),
+            GTK_STYLE_PROVIDER (provider),
+            GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+        g_once_init_leave (&css_once, 1);
+    }
+
     /* The content lives directly in the base class's scrolled window — there
      * is no GtkListView in this view. */
-    GtkWidget *content = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+    GtkWidget *content = gtk_box_new (GTK_ORIENTATION_VERTICAL, 12);
     gtk_widget_set_margin_top (content, 18);
     gtk_widget_set_margin_bottom (content, 18);
     gtk_widget_set_margin_start (content, 18);
@@ -598,13 +843,13 @@ nautilus_other_locations_view_init (NautilusOtherLocationsView *self)
     self->content_box = GTK_BOX (content);
 
     self->this_computer_label = make_section_label (_("This Computer"));
-    gtk_box_append (self->content_box, GTK_WIDGET (self->this_computer_label));
+    gtk_box_append (self->content_box, self->this_computer_label);
 
     self->this_computer_box = make_flow_box ();
     gtk_box_append (self->content_box, GTK_WIDGET (self->this_computer_box));
 
     self->network_label = make_section_label (_("Network"));
-    gtk_box_append (self->content_box, GTK_WIDGET (self->network_label));
+    gtk_box_append (self->content_box, self->network_label);
 
     self->network_box = make_flow_box ();
     gtk_box_append (self->content_box, GTK_WIDGET (self->network_box));
@@ -628,7 +873,24 @@ nautilus_other_locations_view_init (NautilusOtherLocationsView *self)
     g_signal_connect (self->volume_monitor, "mount-changed",
                       G_CALLBACK (on_volume_monitor_changed), self);
 
-    rebuild_cards (self);
+    /* Rebuild when the "show Network section" preference is toggled. */
+    g_signal_connect_object (nautilus_preferences,
+                             "changed::" NAUTILUS_PREFERENCES_OTHER_LOCATIONS_SHOW_NETWORK,
+                             G_CALLBACK (schedule_rebuild), self,
+                             G_CONNECT_SWAPPED);
+
+    /* Previously connected servers, refreshed on load and on any change. */
+    self->recent_servers = nautilus_recent_servers_new ();
+    g_signal_connect_object (self->recent_servers, "notify::loading",
+                             G_CALLBACK (schedule_rebuild), self, G_CONNECT_SWAPPED);
+    g_signal_connect_object (self->recent_servers, "added",
+                             G_CALLBACK (schedule_rebuild), self, G_CONNECT_SWAPPED);
+    g_signal_connect_object (self->recent_servers, "changed",
+                             G_CALLBACK (schedule_rebuild), self, G_CONNECT_SWAPPED);
+    g_signal_connect_object (self->recent_servers, "removed",
+                             G_CALLBACK (schedule_rebuild), self, G_CONNECT_SWAPPED);
+
+    rebuild_tiles (self);
 
     nautilus_list_base_set_zoom_level (NAUTILUS_LIST_BASE (self),
                                        other_locations_view_info.zoom_level_standard);

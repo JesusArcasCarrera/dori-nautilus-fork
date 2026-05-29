@@ -15,3 +15,9 @@ build/
 # Ignore captures
 /*.syscap
 /heaptrack.nautilus.*
+
+# MicroGit local actor config
+.mgconfig
+
+# Meson build dir
+/_build

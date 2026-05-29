@@ -448,6 +448,10 @@ nautilus_preferences_dialog_setup (GtkBuilder *builder)
                        NAUTILUS_PREFERENCES_DIALOG_DELETE_PERMANENTLY_WIDGET,
                        NAUTILUS_PREFERENCES_SHOW_DELETE_PERMANENTLY);
 
+    bind_builder_bool (builder, nautilus_preferences,
+                       "home_hidden_independent_row",
+                       NAUTILUS_PREFERENCES_HOME_HIDDEN_INDEPENDENT);
+
     /* Sidebar visibility toggles. */
     bind_builder_bool (builder, nautilus_preferences,
                        "sidebar_show_recent_row",
@@ -462,6 +466,9 @@ nautilus_preferences_dialog_setup (GtkBuilder *builder)
                        "sidebar_show_network_row",
                        NAUTILUS_PREFERENCES_SIDEBAR_SHOW_NETWORK);
     bind_builder_bool (builder, nautilus_preferences,
+                       "sidebar_show_other_locations_row",
+                       NAUTILUS_PREFERENCES_SIDEBAR_SHOW_OTHER_LOCATIONS);
+    bind_builder_bool (builder, nautilus_preferences,
                        "sidebar_show_trash_row",
                        NAUTILUS_PREFERENCES_SIDEBAR_SHOW_TRASH);
     bind_builder_bool (builder, nautilus_preferences,
@@ -470,6 +477,9 @@ nautilus_preferences_dialog_setup (GtkBuilder *builder)
     bind_builder_bool (builder, nautilus_preferences,
                        "sidebar_show_cloud_row",
                        NAUTILUS_PREFERENCES_SIDEBAR_SHOW_CLOUD);
+    bind_builder_bool (builder, nautilus_preferences,
+                       "other_locations_show_network_row",
+                       NAUTILUS_PREFERENCES_OTHER_LOCATIONS_SHOW_NETWORK);
 
     setup_detailed_date (builder);
 

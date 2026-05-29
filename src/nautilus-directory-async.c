@@ -810,8 +810,31 @@ show_hidden_files_changed_callback (gpointer callback_data)
     show_hidden_files = g_settings_get_boolean (gtk_filechooser_preferences, NAUTILUS_PREFERENCES_SHOW_HIDDEN_FILES);
 }
 
+/* The Home folder can keep its own show-hidden state (fork addition). When
+ * that independent mode is on, hidden files must always be loaded for Home so
+ * the view can show them regardless of the shared show-hidden key. */
 static gboolean
-should_skip_file (GFileInfo *info)
+directory_keeps_hidden_loaded (NautilusDirectory *directory)
+{
+    g_autoptr (GFile) location = NULL;
+    g_autoptr (GFile) home = NULL;
+
+    if (directory == NULL ||
+        !g_settings_get_boolean (nautilus_preferences,
+                                 NAUTILUS_PREFERENCES_HOME_HIDDEN_INDEPENDENT))
+    {
+        return FALSE;
+    }
+
+    location = nautilus_directory_get_location (directory);
+    home = g_file_new_for_path (g_get_home_dir ());
+
+    return location != NULL && g_file_equal (location, home);
+}
+
+static gboolean
+should_skip_file (NautilusDirectory *directory,
+                  GFileInfo         *info)
 {
     static gboolean show_hidden_files_changed_callback_installed = FALSE;
 
@@ -829,7 +852,7 @@ should_skip_file (GFileInfo *info)
         show_hidden_files_changed_callback (NULL);
     }
 
-    if (!show_hidden_files)
+    if (!show_hidden_files && !directory_keeps_hidden_loaded (directory))
     {
         return g_file_info_get_attribute_boolean (info, G_FILE_ATTRIBUTE_STANDARD_IS_HIDDEN) ||
                g_file_info_get_attribute_boolean (info, G_FILE_ATTRIBUTE_STANDARD_IS_BACKUP);
@@ -898,7 +921,7 @@ dequeue_pending_idle_callback (gpointer callback_data)
          * moving this into the actual callback instead of
          * waiting for the idle function.
          */
-        if (dir_load_state && !should_skip_file (file_info))
+        if (dir_load_state && !should_skip_file (directory, file_info))
         {
             dir_load_state->load_file_count += 1;
         }
@@ -2403,7 +2426,8 @@ directory_count_stop (NautilusDirectory *directory)
 }
 
 static guint
-count_non_skipped_files (GList *list)
+count_non_skipped_files (NautilusDirectory *directory,
+                         GList             *list)
 {
     guint count;
     GList *node;
@@ -2413,7 +2437,7 @@ count_non_skipped_files (GList *list)
     for (node = list; node != NULL; node = node->next)
     {
         info = node->data;
-        if (!should_skip_file (info))
+        if (!should_skip_file (directory, info))
         {
             count += 1;
         }
@@ -2505,7 +2529,7 @@ count_more_files_callback (GObject      *source_object,
     files = g_file_enumerator_next_files_finish (state->enumerator,
                                                  res, &error);
 
-    state->file_count += count_non_skipped_files (files);
+    state->file_count += count_non_skipped_files (directory, files);
 
     if (files == NULL)
     {

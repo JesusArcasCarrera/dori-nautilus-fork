@@ -30,6 +30,10 @@ G_BEGIN_DECLS
 /* Display  */
 #define NAUTILUS_PREFERENCES_SHOW_HIDDEN_FILES			"show-hidden"
 
+/* Independent show-hidden state for the Home folder (fork addition) */
+#define NAUTILUS_PREFERENCES_HOME_HIDDEN_INDEPENDENT		"home-hidden-independent"
+#define NAUTILUS_PREFERENCES_HOME_SHOW_HIDDEN			"home-show-hidden"
+
 /* Mouse */
 #define NAUTILUS_PREFERENCES_MOUSE_USE_EXTRA_BUTTONS		"mouse-use-extra-buttons"
 #define NAUTILUS_PREFERENCES_MOUSE_FORWARD_BUTTON		"mouse-forward-button"
@@ -135,6 +139,8 @@ typedef enum
 #define NAUTILUS_PREFERENCES_SIDEBAR_SHOW_STARRED     "sidebar-show-starred"
 #define NAUTILUS_PREFERENCES_SIDEBAR_SHOW_DESKTOP     "sidebar-show-desktop"
 #define NAUTILUS_PREFERENCES_SIDEBAR_SHOW_NETWORK     "sidebar-show-network"
+#define NAUTILUS_PREFERENCES_SIDEBAR_SHOW_OTHER_LOCATIONS "sidebar-show-other-locations"
+#define NAUTILUS_PREFERENCES_OTHER_LOCATIONS_SHOW_NETWORK "other-locations-show-network"
 #define NAUTILUS_PREFERENCES_SIDEBAR_SHOW_TRASH       "sidebar-show-trash"
 #define NAUTILUS_PREFERENCES_SIDEBAR_SHOW_XDG_SECTION "sidebar-show-xdg-section"
 #define NAUTILUS_PREFERENCES_SIDEBAR_SHOW_CLOUD       "sidebar-show-cloud"

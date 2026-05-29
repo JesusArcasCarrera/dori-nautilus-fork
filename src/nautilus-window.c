@@ -723,9 +723,13 @@ nautilus_window_sync_location_widgets (NautilusWindow *window)
 
     if (location != NULL)
     {
-        gtk_widget_set_visible (window->network_address_bar,
-                                g_file_has_uri_scheme (location, SCHEME_NETWORK_VIEW) ||
-                                g_file_has_uri_scheme (location, SCHEME_OTHER_LOCATIONS));
+        gboolean show_server_bar =
+            g_file_has_uri_scheme (location, SCHEME_NETWORK_VIEW) ||
+            (g_file_has_uri_scheme (location, SCHEME_OTHER_LOCATIONS) &&
+             g_settings_get_boolean (nautilus_preferences,
+                                     NAUTILUS_PREFERENCES_OTHER_LOCATIONS_SHOW_NETWORK));
+
+        gtk_widget_set_visible (window->network_address_bar, show_server_bar);
     }
 }
 
@@ -1252,6 +1256,13 @@ nautilus_window_constructed (GObject *self)
     g_signal_connect_object (nautilus_file_undo_manager_get (), "undo-changed",
                              G_CALLBACK (nautilus_window_on_undo_changed), self,
                              G_CONNECT_AFTER);
+
+    /* Toggling "Show Network in Other Locations" must update the server bar
+     * visibility live while sitting on other-locations:///. */
+    g_signal_connect_object (nautilus_preferences,
+                             "changed::" NAUTILUS_PREFERENCES_OTHER_LOCATIONS_SHOW_NETWORK,
+                             G_CALLBACK (nautilus_window_sync_location_widgets), self,
+                             G_CONNECT_SWAPPED);
 
     /* Is required that the UI is constructed before initializing the actions, since
      * some actions trigger UI widgets to show/hide. */

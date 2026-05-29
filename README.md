@@ -10,6 +10,18 @@ This is **not** the [Cinnamon Nemo](https://github.com/linuxmint/nemo) file
 manager from Linux Mint. Both projects happen to share the name. They're
 unrelated and have different goals.
 
+## ⚠️ Personal project — no warranty, no support
+
+This is a **personal fork for my own use**. It is **not affiliated with,
+endorsed by, or supported by GNOME**. "GNOME", "Nautilus" and "GNOME Files"
+are trademarks of their respective owners; this project reuses the
+GPL-licensed *code*, not the branding.
+
+Most of the code in this fork was **written by Claude (Anthropic's AI)** under
+my direction. I provide **no warranty, no support, and no guarantee of
+security or reliability** — use it entirely at your own risk. As with all GPL
+software, it is distributed "as is" (see sections 15–16 of the GPL).
+
 ## What's different from upstream Nautilus
 
 Each item below is a single atomic commit on the `feat/desktop-ux-50` branch.
@@ -113,6 +125,38 @@ empty it via `Backspace`.
 `Ctrl+F` (local search) and `Ctrl+Shift+F` (global search) keep working in
 every mode.
 
+### Other Locations rebuilt as a Windows-style drive & network hub
+
+Upstream removed the classic *Other Locations* page. This fork brings it back
+behind `other-locations:///`, but redesigned as a grid of Windows
+"This PC"-style tiles instead of a flat list. Each tile shows, next to its
+icon, the name and the **real mount path**, and — for mounted local volumes —
+a thin usage bar with *used / total* capacity (the bar/capacity layout is
+still being polished). Unmounted volumes show their device node and no
+capacity. Tiles are grouped into **On This Computer** and **Networks**,
+ordered mounted-first then alphabetically; clicking one navigates to it.
+Local drives, volumes and mounts come straight from `GVolumeMonitor`, so
+eject and usage stay live.
+
+It is reachable from a sidebar entry with **its own visibility toggle** in
+*Preferences → Sidebar → Built-in Items*, independent from the Network entry
+(previously, turning Network off hid Other Locations too).
+
+A *Preferences → Sidebar → Other Locations → **Show Network*** switch controls
+whether the Networks section appears inside Other Locations — so you can hide
+the standalone *Network* sidebar item and still reach networks here. When on,
+the Networks section lists previously-connected servers (FTP/SMB/WebDAV…, from
+`NautilusRecentServers`), `network:///` peers, and active remote mounts, and
+the window's *connect to server* address bar is shown; when off, all of that
+is hidden.
+
+### Desktop sidebar entry honours its toggle
+
+The *Desktop* built-in shortcut was gated behind the shell's
+`gtk-shell-shows-desktop` hint, which is false on GNOME — so its preference
+toggle did nothing and the entry never appeared. It is now controlled solely
+by its *Built-in Items* toggle.
+
 ## Building
 
 ```bash
@@ -147,8 +191,9 @@ sudo dnf install glycin-gtk4-devel tinysparql-devel
 ## Running
 
 The binary is `_build/src/nemo`. Because this fork ships its own GSettings
-schema with new keys (`sidebar-visible`, `type-to-action`), the runtime needs
-to know where to find it. Either:
+schema with new keys (`sidebar-visible`, `type-to-action`,
+`sidebar-show-other-locations`, `other-locations-show-network`, …), the
+runtime needs to know where to find it. Either:
 
 ```bash
 GSETTINGS_SCHEMA_DIR=$PWD/_build/data ./_build/src/nemo
@@ -170,6 +215,9 @@ Implemented:
   - Cut affordance overlay
   - Custom `.nemo_action` context-menu actions (core)
   - Configurable type-to-action
+  - Other Locations rebuilt as a Windows-style drive & network hub
+    (own sidebar toggle + *Show Network* switch)
+  - Desktop sidebar entry honours its toggle
   - Fork rebrand (app ID `org.nemo.Files`, binary `nemo`)
 
 Planned:

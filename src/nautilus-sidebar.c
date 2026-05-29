@@ -974,9 +974,10 @@ update_places (NautilusSidebar *sidebar)
         g_object_unref (start_icon);
     }
 
-    /* desktop */
-    if (sidebar->show_desktop &&
-        g_settings_get_boolean (nautilus_preferences,
+    /* desktop — controlled solely by the user toggle (the shell's
+     * gtk-shell-shows-desktop hint is false on GNOME, which used to hide this
+     * entry unconditionally and made the preference do nothing). */
+    if (g_settings_get_boolean (nautilus_preferences,
                                 NAUTILUS_PREFERENCES_SIDEBAR_SHOW_DESKTOP))
     {
         char *mount_uri = get_desktop_directory_uri ();
@@ -1007,10 +1008,10 @@ update_places (NautilusSidebar *sidebar)
     }
 
     /* Other Locations: combined "This Computer + Network" landing view that
-     * replaces the old Nautilus 3 places sidebar entry. Gated behind the
-     * Network row preference so toggling Network off hides this too. */
+     * replaces the old Nautilus 3 places sidebar entry. Has its own toggle,
+     * independent from Network. */
     if (g_settings_get_boolean (nautilus_preferences,
-                                NAUTILUS_PREFERENCES_SIDEBAR_SHOW_NETWORK))
+                                NAUTILUS_PREFERENCES_SIDEBAR_SHOW_OTHER_LOCATIONS))
     {
         start_icon = g_themed_icon_new_with_default_fallbacks ("drive-multidisk-symbolic");
         add_place (sidebar, NAUTILUS_SIDEBAR_ROW_BUILT_IN,
@@ -4104,6 +4105,10 @@ nautilus_sidebar_init (NautilusSidebar *sidebar)
                              G_CONNECT_SWAPPED);
     g_signal_connect_object (nautilus_preferences,
                              "changed::" NAUTILUS_PREFERENCES_SIDEBAR_SHOW_NETWORK,
+                             G_CALLBACK (update_places), sidebar,
+                             G_CONNECT_SWAPPED);
+    g_signal_connect_object (nautilus_preferences,
+                             "changed::" NAUTILUS_PREFERENCES_SIDEBAR_SHOW_OTHER_LOCATIONS,
                              G_CALLBACK (update_places), sidebar,
                              G_CONNECT_SWAPPED);
     g_signal_connect_object (nautilus_preferences,

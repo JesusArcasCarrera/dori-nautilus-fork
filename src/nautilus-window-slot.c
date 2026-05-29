@@ -152,6 +152,7 @@ struct _NautilusWindowSlot
     GCancellable *mount_cancellable;
     GError *mount_error;
     gboolean tried_mount;
+    gboolean tried_volume_mount;
     guint default_view_id;
 
     /* Menus */
@@ -297,14 +298,14 @@ nautilus_window_slot_get_view_id_for_location (NautilusWindowSlot *self,
         }
     }
 
-    if (nautilus_is_root_for_scheme (effective_location, SCHEME_OTHER_LOCATIONS))
-    {
-        return NAUTILUS_VIEW_OTHER_LOCATIONS_ID;
-    }
-
     if (nautilus_is_root_for_scheme (effective_location, SCHEME_NETWORK_VIEW))
     {
         return NAUTILUS_VIEW_NETWORK_ID;
+    }
+
+    if (nautilus_is_root_for_scheme (effective_location, SCHEME_OTHER_LOCATIONS))
+    {
+        return NAUTILUS_VIEW_OTHER_LOCATIONS_ID;
     }
 
     return self->default_view_id;
@@ -1669,6 +1670,7 @@ begin_location_change (NautilusWindowSlot         *self,
     self->location_change_type = type;
     self->location_change_distance = distance;
     self->tried_mount = FALSE;
+    self->tried_volume_mount = FALSE;
     self->pending_selection =
         check_select_old_location_containing_folder (nautilus_file_list_copy (new_selection),
                                                      type,
@@ -1896,6 +1898,213 @@ mount_not_mounted_callback (GObject      *source_object,
     }
 
     g_object_unref (cancellable);
+}
+
+static void nautilus_window_slot_display_view_selection_failure (GtkWindow    *window,
+                                                                 NautilusFile *file,
+                                                                 GFile        *location,
+                                                                 GError       *error);
+
+/* Returns TRUE if @path equals @prefix or lives under it, respecting
+ * path component boundaries (so "/a/bc" is not considered under "/a/b"). */
+static gboolean
+path_is_within (const char *path,
+                const char *prefix)
+{
+    gsize prefix_len = strlen (prefix);
+
+    if (!g_str_has_prefix (path, prefix))
+    {
+        return FALSE;
+    }
+
+    return path[prefix_len] == '\0' || path[prefix_len] == G_DIR_SEPARATOR;
+}
+
+/* Find an unmounted-but-mountable volume whose predicted mount point
+ * (/run/media/$USER/<label|uuid> or /media/$USER/...) is an ancestor of
+ * @target_path. Returns a ref to the volume and the matched prefix, or NULL. */
+static GVolume *
+find_unmounted_volume_for_path (const char  *target_path,
+                                char       **out_prefix)
+{
+    g_autoptr (GVolumeMonitor) monitor = g_volume_monitor_get ();
+    g_autolist (GVolume) volumes = g_volume_monitor_get_volumes (monitor);
+    const char *user = g_get_user_name ();
+    const char *bases[] = { "/run/media", "/media" };
+    GVolume *match = NULL;
+    g_autofree char *best_prefix = NULL;
+
+    for (GList *l = volumes; l != NULL; l = l->next)
+    {
+        GVolume *volume = l->data;
+        g_autoptr (GMount) mount = g_volume_get_mount (volume);
+        g_autofree char *label = NULL;
+        g_autofree char *uuid = NULL;
+        const char *names[2];
+
+        if (mount != NULL || !g_volume_can_mount (volume))
+        {
+            continue;
+        }
+
+        label = g_volume_get_identifier (volume, G_VOLUME_IDENTIFIER_KIND_LABEL);
+        uuid = g_volume_get_identifier (volume, G_VOLUME_IDENTIFIER_KIND_UUID);
+        names[0] = label;
+        names[1] = uuid;
+
+        for (gsize n = 0; n < G_N_ELEMENTS (names); n++)
+        {
+            if (names[n] == NULL || names[n][0] == '\0')
+            {
+                continue;
+            }
+
+            for (gsize b = 0; b < G_N_ELEMENTS (bases); b++)
+            {
+                g_autofree char *candidate = g_build_filename (bases[b], user, names[n], NULL);
+
+                if (path_is_within (target_path, candidate) &&
+                    (best_prefix == NULL || strlen (candidate) > strlen (best_prefix)))
+                {
+                    g_clear_pointer (&best_prefix, g_free);
+                    best_prefix = g_steal_pointer (&candidate);
+                    match = volume;
+                }
+            }
+        }
+    }
+
+    if (match != NULL)
+    {
+        *out_prefix = g_steal_pointer (&best_prefix);
+        return g_object_ref (match);
+    }
+
+    return NULL;
+}
+
+typedef struct
+{
+    NautilusWindowSlot *slot;
+    char *target_path;
+    char *predicted_prefix;
+} VolumeMountData;
+
+static void
+volume_mount_data_free (VolumeMountData *data)
+{
+    g_clear_object (&data->slot);
+    g_free (data->target_path);
+    g_free (data->predicted_prefix);
+    g_free (data);
+}
+
+static void
+volume_mounted_for_navigation_callback (GObject      *source_object,
+                                        GAsyncResult *res,
+                                        gpointer      user_data)
+{
+    GVolume *volume = G_VOLUME (source_object);
+    VolumeMountData *data = user_data;
+    NautilusWindowSlot *self = data->slot;
+    g_autoptr (GError) error = NULL;
+
+    if (!g_volume_mount_finish (volume, res, &error))
+    {
+        if (!g_error_matches (error, G_IO_ERROR, G_IO_ERROR_FAILED_HANDLED) &&
+            !g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+        {
+            GtkWindow *window = GTK_WINDOW (gtk_widget_get_root (GTK_WIDGET (self)));
+            g_autoptr (GFile) location = g_file_new_for_path (data->target_path);
+
+            nautilus_window_slot_display_view_selection_failure (window, NULL,
+                                                                 location, error);
+        }
+        volume_mount_data_free (data);
+        return;
+    }
+
+    /* Rebuild the destination from the real mount root, in case the actual
+     * mount point differs from our prediction. */
+    g_autoptr (GMount) mount = g_volume_get_mount (volume);
+    g_autoptr (GFile) destination = NULL;
+
+    if (mount != NULL)
+    {
+        g_autoptr (GFile) root = g_mount_get_root (mount);
+        const char *remainder = data->target_path + strlen (data->predicted_prefix);
+
+        while (*remainder == G_DIR_SEPARATOR)
+        {
+            remainder++;
+        }
+
+        destination = (*remainder != '\0') ?
+                      g_file_resolve_relative_path (root, remainder) :
+                      g_object_ref (root);
+    }
+    else
+    {
+        destination = g_file_new_for_path (data->target_path);
+    }
+
+    nautilus_window_slot_open_location_full (self, destination, NULL);
+    volume_mount_data_free (data);
+}
+
+/* When navigation to a local path fails because its volume is not mounted
+ * (the path simply doesn't exist yet), try to mount the matching available
+ * volume and resume navigation, instead of showing an error dialog. */
+static gboolean
+handle_unmounted_volume_if_needed (NautilusWindowSlot *self,
+                                   GFile              *location,
+                                   GError             *error)
+{
+    g_autofree char *target_path = NULL;
+    g_autofree char *predicted_prefix = NULL;
+    g_autoptr (GVolume) volume = NULL;
+    GMountOperation *mount_op;
+    VolumeMountData *data;
+
+    if (self->tried_volume_mount)
+    {
+        return FALSE;
+    }
+
+    if (error->domain != G_IO_ERROR ||
+        (error->code != G_IO_ERROR_NOT_FOUND &&
+         error->code != G_IO_ERROR_NOT_MOUNTED))
+    {
+        return FALSE;
+    }
+
+    target_path = g_file_get_path (location);
+    if (target_path == NULL)
+    {
+        return FALSE;
+    }
+
+    volume = find_unmounted_volume_for_path (target_path, &predicted_prefix);
+    if (volume == NULL)
+    {
+        return FALSE;
+    }
+
+    self->tried_volume_mount = TRUE;
+
+    data = g_new0 (VolumeMountData, 1);
+    data->slot = g_object_ref (self);
+    data->target_path = g_steal_pointer (&target_path);
+    data->predicted_prefix = g_steal_pointer (&predicted_prefix);
+
+    mount_op = gtk_mount_operation_new (GTK_WINDOW (gtk_widget_get_root (GTK_WIDGET (self))));
+    g_mount_operation_set_password_save (mount_op, G_PASSWORD_SAVE_FOR_SESSION);
+    g_volume_mount (volume, G_MOUNT_MOUNT_NONE, mount_op, NULL,
+                    volume_mounted_for_navigation_callback, data);
+    g_object_unref (mount_op);
+
+    return TRUE;
 }
 
 static void
@@ -2165,6 +2374,11 @@ got_file_info_for_view_selection_callback (NautilusFile *file,
     else
     {
         GtkWindow *window = GTK_WINDOW (gtk_widget_get_root (GTK_WIDGET (self)));
+
+        if (handle_unmounted_volume_if_needed (self, location, error))
+        {
+            return;
+        }
 
         nautilus_window_slot_display_view_selection_failure (window,
                                                              ready_file,

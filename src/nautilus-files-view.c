@@ -2514,17 +2514,64 @@ action_current_dir_properties (GSimpleAction *action,
     }
 }
 
+/* The Home folder (~) can keep its own show-hidden state, independent from
+ * every other folder. Returns TRUE when @self is currently showing Home and
+ * that independent mode is enabled. */
+static gboolean
+view_home_is_independent (NautilusFilesView *self)
+{
+    g_autoptr (GFile) home = NULL;
+
+    if (self->location == NULL ||
+        !g_settings_get_boolean (nautilus_preferences,
+                                 NAUTILUS_PREFERENCES_HOME_HIDDEN_INDEPENDENT))
+    {
+        return FALSE;
+    }
+
+    home = g_file_new_for_path (g_get_home_dir ());
+
+    return g_file_equal (self->location, home);
+}
+
+/* Show-hidden state that applies to the directory currently loaded in @self:
+ * the Home-specific key when in independent Home mode, the shared key
+ * (also honoured by the GTK file chooser) otherwise. */
+static gboolean
+view_effective_show_hidden (NautilusFilesView *self)
+{
+    if (view_home_is_independent (self))
+    {
+        return g_settings_get_boolean (nautilus_preferences,
+                                       NAUTILUS_PREFERENCES_HOME_SHOW_HIDDEN);
+    }
+
+    return g_settings_get_boolean (gtk_filechooser_preferences,
+                                   NAUTILUS_PREFERENCES_SHOW_HIDDEN_FILES);
+}
+
 static void
 nautilus_files_view_set_show_hidden_files (NautilusFilesView *self,
                                            gboolean           show_hidden)
 {
     if (show_hidden != self->show_hidden_files)
     {
-        self->show_hidden_files = show_hidden;
+        /* Persist to whichever key governs the current folder; load_directory
+         * derives self->show_hidden_files back from settings. */
+        if (view_home_is_independent (self))
+        {
+            g_settings_set_boolean (nautilus_preferences,
+                                    NAUTILUS_PREFERENCES_HOME_SHOW_HIDDEN,
+                                    show_hidden);
+        }
+        else
+        {
+            g_settings_set_boolean (gtk_filechooser_preferences,
+                                    NAUTILUS_PREFERENCES_SHOW_HIDDEN_FILES,
+                                    show_hidden);
+        }
 
-        g_settings_set_boolean (gtk_filechooser_preferences,
-                                NAUTILUS_PREFERENCES_SHOW_HIDDEN_FILES,
-                                show_hidden);
+        self->show_hidden_files = show_hidden;
 
         if (self->directory != NULL)
         {
@@ -2882,14 +2929,24 @@ static void
 show_hidden_files_changed_callback (gpointer callback_data)
 {
     NautilusFilesView *view;
-    gboolean preference_value;
+    gboolean effective_value;
 
     view = NAUTILUS_FILES_VIEW (callback_data);
 
-    preference_value =
-        g_settings_get_boolean (gtk_filechooser_preferences, NAUTILUS_PREFERENCES_SHOW_HIDDEN_FILES);
+    /* Re-derive from settings instead of reading the shared key directly: a
+     * Home view in independent mode must ignore the shared key (and vice
+     * versa). Don't route through the setter, which would write settings. */
+    effective_value = view_effective_show_hidden (view);
 
-    nautilus_files_view_set_show_hidden_files (view, preference_value);
+    if (effective_value != view->show_hidden_files)
+    {
+        view->show_hidden_files = effective_value;
+
+        if (view->directory != NULL)
+        {
+            load_directory (view, view->directory);
+        }
+    }
 
     if (view->active)
     {
@@ -8646,6 +8703,10 @@ load_directory (NautilusFilesView *self,
     g_clear_object (&self->location);
     self->location = nautilus_directory_get_location (directory);
 
+    /* The Home folder may keep its own show-hidden state; derive the effective
+     * value for the folder we are about to load now that location is known. */
+    self->show_hidden_files = view_effective_show_hidden (self);
+
     g_object_notify_by_pspec (G_OBJECT (self), properties[PROP_LOCATION]);
     g_object_notify_by_pspec (G_OBJECT (self), properties[PROP_LOADING]);
     g_object_notify_by_pspec (G_OBJECT (self), properties[PROP_SEARCHING]);
@@ -9664,6 +9725,12 @@ nautilus_files_view_init (NautilusFilesView *self)
                              G_CONNECT_SWAPPED);
     g_signal_connect_swapped (gtk_filechooser_preferences,
                               "changed::" NAUTILUS_PREFERENCES_SHOW_HIDDEN_FILES,
+                              G_CALLBACK (show_hidden_files_changed_callback), self);
+    g_signal_connect_swapped (nautilus_preferences,
+                              "changed::" NAUTILUS_PREFERENCES_HOME_HIDDEN_INDEPENDENT,
+                              G_CALLBACK (show_hidden_files_changed_callback), self);
+    g_signal_connect_swapped (nautilus_preferences,
+                              "changed::" NAUTILUS_PREFERENCES_HOME_SHOW_HIDDEN,
                               G_CALLBACK (show_hidden_files_changed_callback), self);
     g_signal_connect_swapped (gnome_lockdown_preferences,
                               "changed::" NAUTILUS_PREFERENCES_LOCKDOWN_COMMAND_LINE,

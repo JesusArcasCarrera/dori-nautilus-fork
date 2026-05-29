@@ -30,6 +30,12 @@ Adw.PreferencesDialog preferences_dialog {
         subtitle: _("Choose what plain typing does in a folder view. Ctrl+F and the search button always start a search.");
         use-underline: true;
       }
+
+      Adw.SwitchRow home_hidden_independent_row {
+        title: _("_Independent Hidden Files in Home");
+        subtitle: _("The Home folder keeps its own show/hide hidden files state, separate from every other folder. Hidden in Home by default.");
+        use-underline: true;
+      }
     }
 
     Adw.PreferencesGroup {
@@ -134,6 +140,11 @@ Adw.PreferencesDialog preferences_dialog {
         use-underline: true;
       }
 
+      Adw.SwitchRow sidebar_show_other_locations_row {
+        title: _("_Other Locations");
+        use-underline: true;
+      }
+
       Adw.SwitchRow sidebar_show_trash_row {
         title: _("_Trash");
         use-underline: true;
@@ -153,6 +164,16 @@ Adw.PreferencesDialog preferences_dialog {
       Adw.SwitchRow sidebar_show_cloud_row {
         title: _("_Cloud Providers");
         subtitle: _("Accounts exposed by installed cloud-provider integrations.");
+        use-underline: true;
+      }
+    }
+
+    Adw.PreferencesGroup {
+      title: _("Other Locations");
+
+      Adw.SwitchRow other_locations_show_network_row {
+        title: _("Show _Network");
+        subtitle: _("Include the Network section in Other Locations, so you can hide the sidebar Network entry and still reach networks here.");
         use-underline: true;
       }
     }

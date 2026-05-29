@@ -99,6 +99,16 @@
       <summary>What happens when you start typing in a folder view</summary>
       <description>Choose how typing in a folder is interpreted. "filter" hides items that don't match in the current folder. "locate" jumps to the first item whose name starts with the typed prefix. "search" runs a recursive search like GNOME Files (subject to "recursive-search"). "none" disables type-to-action entirely; use the search button or Ctrl+F to start a search explicitly.</description>
     </key>
+    <key type="b" name="home-hidden-independent">
+      <default>true</default>
+      <summary>Whether the Home folder keeps an independent show-hidden state</summary>
+      <description>If set to true, the “show hidden files” state of the Home folder (~) is tracked separately from every other folder, controlled by the “home-show-hidden” key. Toggling hidden files inside Home no longer affects other folders and vice versa.</description>
+    </key>
+    <key type="b" name="home-show-hidden">
+      <default>false</default>
+      <summary>Whether to show hidden files in the Home folder</summary>
+      <description>Independent show-hidden state for the Home folder (~), used only when “home-hidden-independent” is true. Defaults to false so hidden files are hidden in Home by default.</description>
+    </key>
     <key name="search-filter-time-type" enum="org.gnome.nautilus.SearchFilterTimeType">
       <default>'last_modified'</default>
       <summary>Filter the search dates using either last used or last modified</summary>
@@ -219,6 +229,16 @@
       <default>true</default>
       <summary>Whether to show the Network entry in the sidebar</summary>
       <description>If set to true, the sidebar will list a "Network" shortcut that opens the network locations view.</description>
+    </key>
+    <key type="b" name="sidebar-show-other-locations">
+      <default>true</default>
+      <summary>Whether to show the Other Locations entry in the sidebar</summary>
+      <description>If set to true, the sidebar will list an "Other Locations" shortcut that opens the combined local drives and remote shares view.</description>
+    </key>
+    <key type="b" name="other-locations-show-network">
+      <default>true</default>
+      <summary>Whether the Other Locations view shows the Network section</summary>
+      <description>If set to true, the Other Locations view includes a "Networks" section with remote shares. Lets you hide the sidebar Network entry while still reaching networks from Other Locations.</description>
     </key>
     <key type="b" name="sidebar-show-trash">
       <default>true</default>
