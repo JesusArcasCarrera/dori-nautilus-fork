@@ -201,9 +201,67 @@ GSETTINGS_SCHEMA_DIR=$PWD/_build/data ./_build/src/nemo
 
 or use `meson devenv -C _build src/nemo`, which sets up the same env.
 
-**Don't `ninja install`** unless you understand the conflicts with your
-distro's Nautilus package — the GResource paths and several internal IDs
-still live under `org.gnome.nautilus`.
+**Don't `ninja install`** the default (Nemo-branded) build unless you
+understand the conflicts with your distro's Nautilus package — the GResource
+paths and several internal IDs still live under `org.gnome.nautilus`. For a
+deliberate replacement, see the next section.
+
+## Installing as a replacement for GNOME Files
+
+By default this fork is branded **Nemo** (`nemo` binary, app id
+`org.nemo.Files`) so it **coexists** with the system Nautilus. To instead
+**replace** GNOME Files — keep the `nautilus` name so the `.desktop`, file
+handlers and GNOME Shell all use this fork — build it with the upstream
+identity and install over `/usr`.
+
+**1. Restore the upstream identity** (three lines; the ready-made
+`install-as-nautilus` branch already carries exactly these):
+
+| File | From | To |
+|---|---|---|
+| `meson.build` | `project('nemo', …)` | `project('nautilus', …)` |
+| `meson.build` | `application_id = 'org.nemo.Files' …` | `application_id = 'org.gnome.Nautilus' …` |
+| `src/meson.build` | main `executable('nemo', …)` | `executable('nautilus', …)` |
+
+**2. Build into `/usr` and install** (the `sudo` steps overwrite the files
+owned by the distro `nautilus` package):
+
+```bash
+rm -rf _build_install
+meson setup _build_install -Dprefix=/usr -Dtests=none \
+  -Dintrospection=false -Ddocs=false -Dextensions=false
+ninja -C _build_install
+
+sudo ninja -C _build_install install
+sudo glib-compile-schemas /usr/share/glib-2.0/schemas
+sudo gtk-update-icon-cache -f /usr/share/icons/hicolor
+sudo update-desktop-database /usr/share/applications
+nautilus -q   # drop the running instance; next launch uses the fork
+```
+
+After this, `/usr/bin/nautilus` is the fork and `GSETTINGS_SCHEMA_DIR` is no
+longer needed (the schema lives under `/usr`).
+
+**3. Stop the distro from updating (and reverting) it.** The simple `dnf`
+way — the same `exclude=` trick used to pin a kernel — add to the `[main]`
+section of `/etc/dnf/dnf.conf`:
+
+```
+exclude=nautilus
+```
+
+or in one line:
+
+```bash
+sudo sh -c 'echo "exclude=nautilus" >> /etc/dnf/dnf.conf'
+```
+
+To undo later: remove that line and `sudo dnf reinstall nautilus`.
+
+> A **major Fedora version upgrade** can still reinstall nautilus despite the
+> exclude; rebuild and reinstall the fork afterwards. `gnome-shell` depends on
+> `nautilus`, so **overwrite** in place (as above) rather than
+> `dnf remove nautilus`, which would drag dependencies with it.
 
 ## Status / roadmap
 
