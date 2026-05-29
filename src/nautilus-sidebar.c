@@ -1801,8 +1801,11 @@ drag_motion_callback (GtkDropTarget   *target,
          * file move/copy operation itself, or if we should only try to
          * create bookmarks out of the dragged URIs.
          */
-        if (place_type == NAUTILUS_SIDEBAR_ROW_NEW_BOOKMARK)
+        if (place_type == NAUTILUS_SIDEBAR_ROW_NEW_BOOKMARK ||
+            place_type == NAUTILUS_SIDEBAR_ROW_NEW_PLACE)
         {
+            /* "New bookmark" and "Pin folder" rows have no uri of their own;
+             * dropping a folder there adds it to the list, always a copy. */
             action = GDK_ACTION_COPY;
         }
         else
