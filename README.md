@@ -1,14 +1,13 @@
-# Nemo
+# Dori — a personal Nautilus fork
 
-> Personal fork of [GNOME Files (Nautilus)](https://apps.gnome.org/Nautilus/)
-> with desktop-oriented UX changes for users who don't want a mobile-first
-> file manager.
+> **Dori (Nautilus fork)** is my personal set of changes on top of
+> [GNOME Files (Nautilus)](https://apps.gnome.org/Nautilus/), to make it behave
+> the way I want on the desktop.
 
-## ⚠️ Name disclaimer
-
-This is **not** the [Cinnamon Nemo](https://github.com/linuxmint/nemo) file
-manager from Linux Mint. Both projects happen to share the name. They're
-unrelated and have different goals.
+This is **not** a separate file manager or a rebrand. It keeps Nautilus' own
+identity (binary `nautilus`, app id `org.gnome.Nautilus`) and is meant to be
+**installed over GNOME Files**, so nothing in GNOME (Shell, file handlers,
+search provider) breaks. "Dori" is just the name of this fork/repository.
 
 ## ⚠️ Personal project — no warranty, no support
 
@@ -125,43 +124,42 @@ empty it via `Backspace`.
 `Ctrl+F` (local search) and `Ctrl+Shift+F` (global search) keep working in
 every mode.
 
-### Other Locations rebuilt as a Windows-style drive & network hub
+### Other Locations as a Windows-style drive & network hub
 
 Upstream removed the classic *Other Locations* page. This fork brings it back
-behind `other-locations:///`, but redesigned as a grid of Windows
-"This PC"-style tiles instead of a flat list. Each tile shows, next to its
-icon, the name and the **real mount path**, and — for mounted local volumes —
-a thin usage bar with *used / total* capacity (the bar/capacity layout is
-still being polished). Unmounted volumes show their device node and no
-capacity. Tiles are grouped into **On This Computer** and **Networks**,
-ordered mounted-first then alphabetically; clicking one navigates to it.
-Local drives, volumes and mounts come straight from `GVolumeMonitor`, so
-eject and usage stay live.
+behind `other-locations:///`, redesigned as a grid of Windows
+"This PC"-style tiles. Each tile shows, next to its icon, the name and the
+**real mount path**, and — for mounted local volumes — a thin usage bar with
+*used / total* capacity (the bar/capacity layout is still being polished).
+Unmounted volumes show their device node and no capacity. Tiles are grouped
+into **On This Computer** and **Networks**, ordered mounted-first then
+alphabetically; clicking one navigates to it. Local drives, volumes and mounts
+come straight from `GVolumeMonitor`, so eject and usage stay live.
 
 It is reachable from a sidebar entry with **its own visibility toggle** in
-*Preferences → Sidebar → Built-in Items*, independent from the Network entry
-(previously, turning Network off hid Other Locations too).
-
+*Preferences → Sidebar → Built-in Items*, independent from the Network entry.
 A *Preferences → Sidebar → Other Locations → **Show Network*** switch controls
 whether the Networks section appears inside Other Locations — so you can hide
 the standalone *Network* sidebar item and still reach networks here. When on,
-the Networks section lists previously-connected servers (FTP/SMB/WebDAV…, from
-`NautilusRecentServers`), `network:///` peers, and active remote mounts, and
-the window's *connect to server* address bar is shown; when off, all of that
-is hidden.
+the Networks section lists previously-connected servers (`NautilusRecentServers`),
+`network:///` peers, and active remote mounts, and the window's *connect to
+server* address bar is shown; when off, all of that is hidden.
 
-### Desktop sidebar entry honours its toggle
+### Editable XDG/places sidebar section
 
-The *Desktop* built-in shortcut was gated behind the shell's
-`gtk-shell-shows-desktop` hint, which is false on GNOME — so its preference
-toggle did nothing and the entry never appeared. It is now controlled solely
-by its *Built-in Items* toggle.
+The user-folders block in the sidebar (Documents, Downloads, …) is an editable
+list backed by the `sidebar-places` GSettings key: drag folders onto the
+**Pin folder** affordance to add them, drag rows to **reorder** within the
+section, and remove entries from the context menu. The *Desktop* built-in
+entry is now controlled solely by its own toggle (instead of being gated
+behind the shell's `gtk-shell-shows-desktop` hint, which is false on GNOME and
+made the toggle do nothing).
 
 ## Building
 
 ```bash
-git clone <this fork>
-cd nautilus
+git clone https://github.com/JesusArcasCarrera/dori-nautilus-fork.git
+cd dori-nautilus-fork
 
 # A meson wrap for blueprint-compiler ≥ 0.19 lives in
 # subprojects/blueprint-compiler.wrap and is fetched automatically;
@@ -176,8 +174,6 @@ meson setup _build \
 ninja -C _build
 ```
 
-`-Dprefix=/usr` makes the binary use `/usr/share/locale` so it picks up the
-system's translations (so the UI is localised even when running uninstalled).
 `-Dextensions=false` skips the stock extensions that need `gexiv2-0.16` (not
 yet packaged on Fedora 43 and not needed by anything in this fork).
 
@@ -188,80 +184,34 @@ sudo dnf builddep nautilus
 sudo dnf install glycin-gtk4-devel tinysparql-devel
 ```
 
-## Running
+## Installing (replaces GNOME Files)
 
-The binary is `_build/src/nemo`. Because this fork ships its own GSettings
-schema with new keys (`sidebar-visible`, `type-to-action`,
-`sidebar-show-other-locations`, `other-locations-show-network`, …), the
-runtime needs to know where to find it. Either:
-
-```bash
-GSETTINGS_SCHEMA_DIR=$PWD/_build/data ./_build/src/nemo
-```
-
-or use `meson devenv -C _build src/nemo`, which sets up the same env.
-
-**Don't `ninja install`** the default (Nemo-branded) build unless you
-understand the conflicts with your distro's Nautilus package — the GResource
-paths and several internal IDs still live under `org.gnome.nautilus`. For a
-deliberate replacement, see the next section.
-
-## Installing as a replacement for GNOME Files
-
-By default this fork is branded **Nemo** (`nemo` binary, app id
-`org.nemo.Files`) so it **coexists** with the system Nautilus. To instead
-**replace** GNOME Files — keep the `nautilus` name so the `.desktop`, file
-handlers and GNOME Shell all use this fork — build it with the upstream
-identity and install over `/usr`.
-
-**1. Restore the upstream identity** (three lines; the ready-made
-`install-as-nautilus` branch already carries exactly these):
-
-| File | From | To |
-|---|---|---|
-| `meson.build` | `project('nemo', …)` | `project('nautilus', …)` |
-| `meson.build` | `application_id = 'org.nemo.Files' …` | `application_id = 'org.gnome.Nautilus' …` |
-| `src/meson.build` | main `executable('nemo', …)` | `executable('nautilus', …)` |
-
-**2. Build into `/usr` and install** (the `sudo` steps overwrite the files
-owned by the distro `nautilus` package):
+The fork keeps Nautilus' identity, so installing it **replaces** the system
+GNOME Files. The simplest way is the bundled script — run it **without** sudo;
+it builds as your user and asks for the password once for the system steps:
 
 ```bash
-rm -rf _build_install
-meson setup _build_install -Dprefix=/usr -Dtests=none \
-  -Dintrospection=false -Ddocs=false -Dextensions=false
-ninja -C _build_install
-
-sudo ninja -C _build_install install
-sudo glib-compile-schemas /usr/share/glib-2.0/schemas
-sudo gtk-update-icon-cache -f /usr/share/icons/hicolor
-sudo update-desktop-database /usr/share/applications
-nautilus -q   # drop the running instance; next launch uses the fork
+./install.sh
 ```
 
-After this, `/usr/bin/nautilus` is the fork and `GSETTINGS_SCHEMA_DIR` is no
-longer needed (the schema lives under `/usr`).
+It builds into `_build_install`, installs into `/usr`, refreshes the
+GLib/icon/desktop caches, pins the distro `nautilus` package so a `dnf upgrade`
+won't revert it (`exclude=nautilus` in `/etc/dnf/dnf.conf`), and restarts the
+running instance.
 
-**3. Stop the distro from updating (and reverting) it.** The simple `dnf`
-way — the same `exclude=` trick used to pin a kernel — add to the `[main]`
-section of `/etc/dnf/dnf.conf`:
+To undo: remove `exclude=nautilus` from `/etc/dnf/dnf.conf` and run
+`sudo dnf reinstall nautilus`.
 
-```
-exclude=nautilus
-```
+### Running uninstalled (for development)
 
-or in one line:
+Because the fork ships its own GSettings schema with new keys
+(`sidebar-visible`, `type-to-action`, `sidebar-show-other-locations`,
+`other-locations-show-network`, …), point the runtime at the built schema:
 
 ```bash
-sudo sh -c 'echo "exclude=nautilus" >> /etc/dnf/dnf.conf'
+nautilus -q   # quit the system instance first (shared org.gnome.Nautilus id)
+GSETTINGS_SCHEMA_DIR=$PWD/_build/data ./_build/src/nautilus
 ```
-
-To undo later: remove that line and `sudo dnf reinstall nautilus`.
-
-> A **major Fedora version upgrade** can still reinstall nautilus despite the
-> exclude; rebuild and reinstall the fork afterwards. `gnome-shell` depends on
-> `nautilus`, so **overwrite** in place (as above) rather than
-> `dnf remove nautilus`, which would drag dependencies with it.
 
 ## Status / roadmap
 
@@ -273,10 +223,8 @@ Implemented:
   - Cut affordance overlay
   - Custom `.nemo_action` context-menu actions (core)
   - Configurable type-to-action
-  - Other Locations rebuilt as a Windows-style drive & network hub
-    (own sidebar toggle + *Show Network* switch)
-  - Desktop sidebar entry honours its toggle
-  - Fork rebrand (app ID `org.nemo.Files`, binary `nemo`)
+  - Other Locations Windows-style drive & network hub
+  - Editable + reorderable XDG/places sidebar section
 
 Planned:
 
@@ -287,6 +235,7 @@ Planned:
     tabs/views pointing at other devices.
   - **`.nemo_action` GUI editor** — create, edit, reorder and group
     actions without editing files by hand.
+  - **Usage-bar polish** in the Other Locations tiles.
 
 ## License
 
