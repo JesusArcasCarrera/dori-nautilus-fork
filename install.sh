@@ -58,7 +58,9 @@ echo ">> Installing over /usr — you'll be asked for your password once."
 sudo sh -s "$REPO_DIR/$BUILD_DIR" <<'ROOT'
 set -e
 BUILD="$1"
-ninja -C "$BUILD" install
+# --no-rebuild: install only, never recompile as root (otherwise root-owned
+# artifacts land in the build dir and break later user builds).
+meson install --no-rebuild -C "$BUILD"
 glib-compile-schemas /usr/share/glib-2.0/schemas
 gtk-update-icon-cache -f /usr/share/icons/hicolor 2>/dev/null || true
 update-desktop-database /usr/share/applications 2>/dev/null || true

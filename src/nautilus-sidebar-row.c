@@ -672,6 +672,9 @@ nautilus_sidebar_row_class_init (NautilusSidebarRowClass *klass)
                           (G_PARAM_READWRITE |
                            G_PARAM_STATIC_STRINGS));
 
+    /* Not construct-only: the drag placeholder is reused across drags and
+     * needs its section reassigned so it sorts into the dragged row's section
+     * (bookmarks or the XDG/places list). */
     properties [PROP_SECTION_TYPE] =
         g_param_spec_enum ("section-type",
                            "section type",
@@ -680,7 +683,7 @@ nautilus_sidebar_row_class_init (NautilusSidebarRowClass *klass)
                            NAUTILUS_SIDEBAR_SECTION_INVALID,
                            (G_PARAM_READWRITE |
                             G_PARAM_STATIC_STRINGS |
-                            G_PARAM_CONSTRUCT_ONLY));
+                            G_PARAM_CONSTRUCT));
 
     properties [PROP_PLACE_TYPE] =
         g_param_spec_enum ("place-type",
