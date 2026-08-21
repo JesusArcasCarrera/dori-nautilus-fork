@@ -20,11 +20,24 @@ REPO_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_DIR"
 
 BUILD_DIR="_build_install"
+MESON_SETUP_OPTIONS=(
+    -Dprefix=/usr
+    -Dtests=none
+    -Dintrospection=false
+    -Ddocs=false
+    -Dextensions=false
+)
 
 # --- Build as the current user (no sudo) ------------------------------------
 if [ ! -d "$BUILD_DIR" ]; then
-    meson setup "$BUILD_DIR" -Dprefix=/usr -Dtests=none \
-        -Dintrospection=false -Ddocs=false -Dextensions=false
+    meson setup "$BUILD_DIR" "$REPO_DIR" "${MESON_SETUP_OPTIONS[@]}"
+elif [ ! -f "$BUILD_DIR/build.ninja" ]; then
+    echo "error: $BUILD_DIR exists, but it is not a valid build directory." >&2
+    echo "Move or remove it, then run the installer again." >&2
+    exit 1
+elif ! grep -Fq "meson --internal regenerate $REPO_DIR ." "$BUILD_DIR/build.ninja"; then
+    echo ">> Repository path changed; regenerating $BUILD_DIR..."
+    meson setup --wipe "$BUILD_DIR" "$REPO_DIR" "${MESON_SETUP_OPTIONS[@]}"
 fi
 ninja -C "$BUILD_DIR"
 
