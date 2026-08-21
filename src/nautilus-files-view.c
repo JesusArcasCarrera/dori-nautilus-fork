@@ -44,6 +44,7 @@
 #include "nautilus-compress-dialog.h"
 #include "nautilus-dbus-launcher.h"
 #include "nautilus-directory.h"
+#include "nautilus-disk-usage-window.h"
 #include "nautilus-dnd.h"
 #include "nautilus-enums.h"
 #include "nautilus-error-reporting.h"
@@ -2512,6 +2513,55 @@ action_current_dir_properties (GSimpleAction *action,
 
         nautilus_file_list_free (files);
     }
+}
+
+static gboolean
+file_can_show_disk_usage_map (NautilusFile *file)
+{
+    g_autoptr (GFile) location = NULL;
+
+    if (file == NULL || !nautilus_file_is_directory (file))
+    {
+        return FALSE;
+    }
+
+    location = nautilus_file_get_location (file);
+    return location != NULL && g_file_is_native (location);
+}
+
+static void
+show_disk_usage_map (NautilusFilesView *self,
+                     NautilusFile      *file)
+{
+    g_autoptr (GFile) location = NULL;
+
+    g_return_if_fail (file_can_show_disk_usage_map (file));
+
+    location = nautilus_file_get_location (file);
+    nautilus_disk_usage_window_present (location,
+                                        nautilus_files_view_get_containing_window (self));
+}
+
+static void
+action_disk_usage_map (GSimpleAction *action,
+                       GVariant      *state,
+                       gpointer       user_data)
+{
+    NautilusFilesView *self = NAUTILUS_FILES_VIEW (user_data);
+    g_autolist (NautilusFile) selection = nautilus_files_view_get_selection (self);
+
+    g_return_if_fail (list_len_is_one (selection));
+    show_disk_usage_map (self, selection->data);
+}
+
+static void
+action_current_dir_disk_usage_map (GSimpleAction *action,
+                                   GVariant      *state,
+                                   gpointer       user_data)
+{
+    NautilusFilesView *self = NAUTILUS_FILES_VIEW (user_data);
+
+    show_disk_usage_map (self, self->directory_as_file);
 }
 
 /* The Home folder (~) can keep its own show-hidden state, independent from
@@ -7048,6 +7098,8 @@ const GActionEntry view_entries[] =
     { .name = "send-email", .activate = action_send_email },
     { .name = "console", .activate = action_open_console },
     { .name = "current-directory-console", .activate = action_current_dir_open_console },
+    { .name = "disk-usage-map", .activate = action_disk_usage_map },
+    { .name = "current-directory-disk-usage-map", .activate = action_current_dir_disk_usage_map },
     { .name = "properties", .activate = action_properties},
     { .name = "current-directory-properties", .activate = action_current_dir_properties},
     { .name = "run-in-terminal", .activate = action_run_in_terminal },
@@ -7813,6 +7865,21 @@ nautilus_files_view_update_actions_state (NautilusFilesView *self)
                                  mode == NAUTILUS_MODE_BROWSE &&
                                  nautilus_dbus_launcher_is_available (nautilus_dbus_launcher_get (),
                                                                       NAUTILUS_DBUS_LAUNCHER_CONSOLE));
+    action = g_action_map_lookup_action (G_ACTION_MAP (view_action_group),
+                                         "disk-usage-map");
+    g_simple_action_set_enabled (G_SIMPLE_ACTION (action),
+                                 mode == NAUTILUS_MODE_BROWSE &&
+                                 list_len_is_one (selection) &&
+                                 file_can_show_disk_usage_map (selection->data));
+    action = g_action_map_lookup_action (G_ACTION_MAP (view_action_group),
+                                         "current-directory-disk-usage-map");
+    g_simple_action_set_enabled (G_SIMPLE_ACTION (action),
+                                 mode == NAUTILUS_MODE_BROWSE &&
+                                 !selection_contains_recent &&
+                                 !selection_contains_search &&
+                                 !selection_contains_starred &&
+                                 !is_network_view &&
+                                 file_can_show_disk_usage_map (self->directory_as_file));
     action = g_action_map_lookup_action (G_ACTION_MAP (view_action_group),
                                          "properties");
     g_simple_action_set_enabled (G_SIMPLE_ACTION (action),

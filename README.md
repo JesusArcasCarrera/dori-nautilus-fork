@@ -155,6 +155,20 @@ entry is now controlled solely by its own toggle (instead of being gated
 behind the shell's `gtk-shell-shows-desktop` hint, which is false on GNOME and
 made the toggle do nothing).
 
+### Interactive folder usage map
+
+Right-click a single local folder — or the background of the current folder —
+and choose **Disk Usage Map…** to open a proportional treemap of its contents.
+Each rectangle represents the space used by a direct subfolder; files stored
+directly in the current level are grouped into their own rectangle. Click a
+folder to explore its children, or use the arrow keys and Enter; Backspace and
+the header's back button return to the parent level.
+
+Scanning runs outside the UI thread, reports live progress and can be cancelled
+by closing the window. It measures allocated disk space, does not follow
+symbolic links or cross into another filesystem, deduplicates hard links, and
+shows a partial-results notice when some folders cannot be read.
+
 ## Building
 
 ```bash
@@ -225,6 +239,7 @@ Implemented:
   - Configurable type-to-action
   - Other Locations Windows-style drive & network hub
   - Editable + reorderable XDG/places sidebar section
+  - Interactive folder usage treemap
 
 Planned:
 

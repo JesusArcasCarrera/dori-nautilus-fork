@@ -10759,9 +10759,9 @@ msgstr "Submenú / Grupo (opcional)"
 #~ "Please check your gvfs installation."
 #~ msgstr "No se puede cargar la lista de métodos de servidor admitidos.\n"
 
-#, fuzzy
-#~ msgid "Try Again"
-#~ msgstr "Intentar otra vez"
+#: src/nautilus-disk-usage-window.c
+msgid "Try Again"
+msgstr "Intentar de nuevo"
 
 #, fuzzy
 #~ msgid "Please verify your user details."
@@ -13754,3 +13754,67 @@ msgstr "Submenú / Grupo (opcional)"
 #~ msgstr ""
 #~ "Nautilus es un shell gráfico para GNOME que facilita la administración de "
 #~ "sus archivos y el resto de su sistema."
+
+#: src/nautilus-disk-usage-model.c
+msgid "The selected item is not a folder"
+msgstr "El elemento seleccionado no es una carpeta"
+
+#: src/nautilus-disk-usage-window.c
+#, c-format
+msgid "%s · %s files · %s folders"
+msgstr "%s · %s archivos · %s carpetas"
+
+#: src/nautilus-disk-usage-window.c
+#, c-format
+msgid "Incomplete: %s unreadable · %s on other file systems"
+msgstr "Incompleto: %s sin acceso · %s en otros sistemas de archivos"
+
+#: src/nautilus-disk-usage-window.c
+msgid "This Folder Is Empty"
+msgstr "Esta carpeta está vacía"
+
+#: src/nautilus-disk-usage-window.c
+msgid "There is no content to show in the map."
+msgstr "No hay contenido que mostrar en el mapa."
+
+#: src/nautilus-disk-usage-window.c
+msgid "Scan Again"
+msgstr "Analizar de nuevo"
+
+#: src/nautilus-disk-usage-window.c
+#, c-format
+msgid "%s\n%s · %s files"
+msgstr "%s\n%s · %s archivos"
+
+#: src/nautilus-disk-usage-window.c
+#, c-format
+msgid "Scanning… %s · %s files · %s folders"
+msgstr "Analizando… %s · %s archivos · %s carpetas"
+
+#: src/nautilus-disk-usage-window.c
+msgid "Could Not Scan This Folder"
+msgstr "No se pudo analizar esta carpeta"
+
+#: src/nautilus-disk-usage-window.c
+msgid "The scan did not finish."
+msgstr "El análisis no terminó."
+
+#: src/nautilus-disk-usage-window.c
+msgid "Disk Usage Map"
+msgstr "Mapa de uso del disco"
+
+#: src/nautilus-disk-usage-window.c
+msgid "Starting scan…"
+msgstr "Iniciando análisis…"
+
+#: src/nautilus-disk-usage-window.c
+msgid "Go to Parent Folder"
+msgstr "Ir a la carpeta superior"
+
+#: src/nautilus-disk-usage-window.c
+msgid "Click a folder to explore it · Backspace returns to the parent folder"
+msgstr "Pulse una carpeta para explorarla · Retroceso vuelve a la carpeta superior"
+
+#: src/resources/menu/nautilus-files-view-context-menus.ui
+msgid "Disk Usage _Map…"
+msgstr "_Mapa de uso del disco…"

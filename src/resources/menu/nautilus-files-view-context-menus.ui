@@ -59,6 +59,11 @@
     <section id="background-custom-actions-section"/>
     <section>
       <item>
+        <attribute name="label" translatable="yes">Disk Usage _Map…</attribute>
+        <attribute name="action">view.current-directory-disk-usage-map</attribute>
+        <attribute name="hidden-when">action-disabled</attribute>
+      </item>
+      <item>
         <attribute name="label" translatable="yes">P_roperties</attribute>
         <attribute name="action">view.current-directory-properties</attribute>
         <attribute name="hidden-when">action-disabled</attribute>
@@ -279,6 +284,11 @@
     <section id="selection-extensions-section"/>
     <section id="selection-custom-actions-section"/>
     <section>
+      <item>
+        <attribute name="label" translatable="yes">Disk Usage _Map…</attribute>
+        <attribute name="action">view.disk-usage-map</attribute>
+        <attribute name="hidden-when">action-disabled</attribute>
+      </item>
       <item>
         <attribute name="label" translatable="yes">P_roperties</attribute>
         <attribute name="action">view.properties</attribute>
