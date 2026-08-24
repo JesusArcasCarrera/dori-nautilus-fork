@@ -15,6 +15,7 @@ tests = {
   'test-file-utilities': {},
   'test-filename-common-prefix': {},
   'test-filename-utilities': {},
+  'test-folder-tools': {},
   'test-nautilus-search-engine': {},
   # disable localsearch tests for now, until issues with accessing it from
   # within the sandbox are resolved

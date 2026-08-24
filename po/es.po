@@ -13818,3 +13818,105 @@ msgstr "Pulse una carpeta para explorarla · Retroceso vuelve a la carpeta super
 #: src/resources/menu/nautilus-files-view-context-menus.ui
 msgid "Disk Usage _Map…"
 msgstr "_Mapa de uso del disco…"
+
+#: src/nautilus-files-view.c
+msgid "Another folder operation is already running"
+msgstr "Ya hay otra operación de carpeta en curso"
+
+#: src/nautilus-files-view.c
+msgid "Clean Empty Folders?"
+msgstr "¿Limpiar las carpetas vacías?"
+
+#: src/nautilus-files-view.c
+msgid "Cleaning empty folders…"
+msgstr "Limpiando carpetas vacías…"
+
+#: src/nautilus-files-view.c
+msgid "Could Not Clean Empty Folders"
+msgstr "No se pudieron limpiar las carpetas vacías"
+
+#: src/nautilus-files-view.c
+msgid "Could Not Group Media"
+msgstr "No se pudieron agrupar los medios"
+
+#: src/nautilus-files-view.c
+#, c-format
+msgid "Empty folders inside “%s” will be removed, including nested empty folders. The selected folder will be kept."
+msgstr "Se eliminarán las carpetas vacías dentro de «%s», incluidas las carpetas vacías anidadas. La carpeta seleccionada se conservará."
+
+#: src/nautilus-files-view.c
+#, c-format
+msgid "Files directly inside “%s” will be moved into category folders for images, videos, audio, documents, archives, and other files. Existing subfolders will not be changed."
+msgstr "Los archivos que están directamente dentro de «%s» se moverán a carpetas por categorías para imágenes, vídeos, audio, documentos, archivos comprimidos y otros archivos. Las subcarpetas existentes no se modificarán."
+
+#: src/nautilus-files-view.c
+msgid "Group Media?"
+msgstr "¿Agrupar los medios?"
+
+#: src/nautilus-files-view.c
+#, c-format
+msgid "Grouped: %u. Failed: %u."
+msgstr "Agrupados: %u. Fallidos: %u."
+
+#: src/nautilus-files-view.c
+msgid "Grouping media…"
+msgstr "Agrupando medios…"
+
+#: src/nautilus-files-view.c
+msgid "No empty folders found"
+msgstr "No se encontraron carpetas vacías"
+
+#: src/nautilus-files-view.c
+msgid "No files to group"
+msgstr "No hay archivos que agrupar"
+
+#: src/nautilus-files-view.c
+msgid "Operation cancelled"
+msgstr "Operación cancelada"
+
+#: src/nautilus-files-view.c
+#, c-format
+msgid "Removed: %u. Failed: %u."
+msgstr "Eliminadas: %u. Fallidas: %u."
+
+#: src/nautilus-files-view.c
+msgid "Some Folders Could Not Be Cleaned"
+msgstr "No se pudieron limpiar algunas carpetas"
+
+#: src/nautilus-files-view.c
+msgid "Some Media Could Not Be Grouped"
+msgstr "No se pudieron agrupar algunos medios"
+
+#: src/nautilus-files-view.c
+msgid "The operation failed."
+msgstr "La operación ha fallado."
+
+#: src/nautilus-files-view.c
+msgid "_Clean"
+msgstr "_Limpiar"
+
+#: src/nautilus-files-view.c
+msgid "_Group Files"
+msgstr "_Agrupar"
+
+#: src/nautilus-files-view.c
+#, c-format
+msgid "%u empty folder removed"
+msgid_plural "%u empty folders removed"
+msgstr[0] "Se eliminó %u carpeta vacía"
+msgstr[1] "Se eliminaron %u carpetas vacías"
+
+#: src/nautilus-files-view.c
+#, c-format
+msgid "%u file grouped"
+msgid_plural "%u files grouped"
+msgstr[0] "Se agrupó %u archivo"
+msgstr[1] "Se agruparon %u archivos"
+
+#: src/resources/menu/nautilus-files-view-context-menus.ui
+msgid "_Clean Empty Folders…"
+msgstr "_Limpiar carpetas vacías…"
+
+#: src/resources/menu/nautilus-files-view-context-menus.ui
+msgid "Group _Media…"
+msgstr "Agrupar _medios…"

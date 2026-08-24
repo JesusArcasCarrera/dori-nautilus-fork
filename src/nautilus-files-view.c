@@ -53,6 +53,7 @@
 #include "nautilus-file.h"
 #include "nautilus-filename-utilities.h"
 #include "nautilus-floating-bar.h"
+#include "nautilus-folder-tools.h"
 #include "nautilus-global-preferences.h"
 #include "nautilus-grid-view.h"
 #include "nautilus-grid-view-captions-dialog.h"
@@ -82,6 +83,7 @@
 #include "nautilus-view-info.h"
 #include "nautilus-view-item.h"
 #include "nautilus-view-model.h"
+#include "nautilus-window.h"
 #include "nautilus-window-slot.h"
 
 /* Minimum starting update interval */
@@ -256,6 +258,8 @@ struct _NautilusFilesView
     GCancellable *clipboard_cancellable;
 
     GCancellable *starred_cancellable;
+
+    GCancellable *folder_tool_cancellable;
 };
 
 /**
@@ -279,6 +283,20 @@ typedef struct
     NautilusFilesView *view;
     NautilusFileList *selection;
 } CompressCallbackData;
+
+typedef enum
+{
+    FOLDER_TOOL_CLEAN_EMPTY,
+    FOLDER_TOOL_GROUP_MEDIA,
+} FolderToolOperation;
+
+typedef struct
+{
+    NautilusFilesView *view;
+    GFile *location;
+    GCancellable *cancellable;
+    FolderToolOperation operation;
+} FolderToolRequest;
 
 typedef struct
 {
@@ -2564,6 +2582,330 @@ action_current_dir_disk_usage_map (GSimpleAction *action,
     show_disk_usage_map (self, self->directory_as_file);
 }
 
+static gboolean
+file_can_use_folder_tools (NautilusFile *file)
+{
+    g_autoptr (GFile) location = NULL;
+
+    if (file == NULL ||
+        !nautilus_file_is_directory (file) ||
+        !nautilus_file_can_write (file))
+    {
+        return FALSE;
+    }
+
+    location = nautilus_file_get_location (file);
+    return location != NULL && g_file_is_native (location);
+}
+
+static FolderToolRequest *
+folder_tool_request_new (NautilusFilesView  *view,
+                         NautilusFile       *file,
+                         FolderToolOperation operation)
+{
+    FolderToolRequest *request;
+
+    request = g_new0 (FolderToolRequest, 1);
+    request->view = g_object_ref (view);
+    request->location = nautilus_file_get_location (file);
+    request->operation = operation;
+
+    return request;
+}
+
+static void
+folder_tool_request_free (FolderToolRequest *request)
+{
+    g_clear_object (&request->cancellable);
+    g_clear_object (&request->location);
+    g_clear_object (&request->view);
+    g_free (request);
+}
+
+static void
+cancel_folder_tool (FolderToolRequest *request)
+{
+    g_cancellable_cancel (request->cancellable);
+}
+
+static void
+show_folder_tool_toast (FolderToolRequest *request,
+                        const char        *label)
+{
+    GtkWindow *window = nautilus_files_view_get_containing_window (request->view);
+
+    if (NAUTILUS_IS_WINDOW (window))
+    {
+        nautilus_window_show_operation_notification (NAUTILUS_WINDOW (window),
+                                                     (char *) label,
+                                                     request->location,
+                                                     FALSE);
+    }
+}
+
+static void
+folder_tool_done (GObject      *source_object,
+                  GAsyncResult *async_result,
+                  gpointer      user_data)
+{
+    FolderToolRequest *request = user_data;
+    g_autoptr (NautilusFolderToolsResult) result = NULL;
+    g_autoptr (GError) error = NULL;
+    g_autofree char *message = NULL;
+    g_autofree char *summary_message = NULL;
+    GtkWindow *window;
+    guint changed;
+    guint failed;
+
+    nautilus_ui_timed_wait_stop ((TimedWaitCancelCallback) cancel_folder_tool, request);
+
+    if (request->view->folder_tool_cancellable == request->cancellable)
+    {
+        g_clear_object (&request->view->folder_tool_cancellable);
+    }
+    nautilus_files_view_update_actions_state (request->view);
+    schedule_update_context_menus (request->view);
+
+    result = nautilus_folder_tools_finish (async_result, &error);
+    if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+    {
+        show_folder_tool_toast (request, _("Operation cancelled"));
+        folder_tool_request_free (request);
+        return;
+    }
+
+    window = nautilus_files_view_get_containing_window (request->view);
+    if (result == NULL)
+    {
+        const char *heading = request->operation == FOLDER_TOOL_CLEAN_EMPTY ?
+                              _("Could Not Clean Empty Folders") :
+                              _("Could Not Group Media");
+
+        if (window != NULL)
+        {
+            nautilus_show_ok_dialog (heading,
+                                     error != NULL ? error->message : _("The operation failed."),
+                                     GTK_WIDGET (window));
+        }
+        folder_tool_request_free (request);
+        return;
+    }
+
+    changed = nautilus_folder_tools_result_get_changed (result);
+    failed = nautilus_folder_tools_result_get_failed (result);
+
+    if (failed > 0)
+    {
+        const char *heading;
+
+        if (request->operation == FOLDER_TOOL_CLEAN_EMPTY)
+        {
+            heading = _("Some Folders Could Not Be Cleaned");
+            summary_message = g_strdup_printf (_("Removed: %u. Failed: %u."),
+                                               changed,
+                                               failed);
+        }
+        else
+        {
+            heading = _("Some Media Could Not Be Grouped");
+            summary_message = g_strdup_printf (_("Grouped: %u. Failed: %u."),
+                                               changed,
+                                               failed);
+        }
+
+        message = g_strdup_printf ("%s\n\n%s",
+                                   summary_message,
+                                   nautilus_folder_tools_result_get_first_error (result));
+        if (window != NULL)
+        {
+            nautilus_show_ok_dialog (heading, message, GTK_WIDGET (window));
+        }
+    }
+    else if (request->operation == FOLDER_TOOL_CLEAN_EMPTY)
+    {
+        if (changed == 0)
+        {
+            show_folder_tool_toast (request, _("No empty folders found"));
+        }
+        else
+        {
+            message = g_strdup_printf (ngettext ("%u empty folder removed",
+                                                 "%u empty folders removed",
+                                                 changed),
+                                       changed);
+            show_folder_tool_toast (request, message);
+        }
+    }
+    else if (changed == 0)
+    {
+        show_folder_tool_toast (request, _("No files to group"));
+    }
+    else
+    {
+        message = g_strdup_printf (ngettext ("%u file grouped",
+                                             "%u files grouped",
+                                             changed),
+                                   changed);
+        show_folder_tool_toast (request, message);
+    }
+
+    folder_tool_request_free (request);
+}
+
+static void
+folder_tool_confirmation_done (AdwAlertDialog *dialog,
+                               GAsyncResult   *result,
+                               gpointer        user_data)
+{
+    FolderToolRequest *request = user_data;
+    const char *response = adw_alert_dialog_choose_finish (dialog, result);
+    GtkWindow *window;
+
+    if (!g_str_equal (response, "run"))
+    {
+        folder_tool_request_free (request);
+        return;
+    }
+
+    if (request->view->folder_tool_cancellable != NULL)
+    {
+        show_folder_tool_toast (request, _("Another folder operation is already running"));
+        folder_tool_request_free (request);
+        return;
+    }
+
+    request->cancellable = g_cancellable_new ();
+    g_set_object (&request->view->folder_tool_cancellable, request->cancellable);
+    nautilus_files_view_update_actions_state (request->view);
+    schedule_update_context_menus (request->view);
+
+    window = nautilus_files_view_get_containing_window (request->view);
+    nautilus_ui_timed_wait_start ((TimedWaitCancelCallback) cancel_folder_tool,
+                                  request,
+                                  request->operation == FOLDER_TOOL_CLEAN_EMPTY ?
+                                  _("Cleaning empty folders…") :
+                                  _("Grouping media…"),
+                                  window);
+
+    if (request->operation == FOLDER_TOOL_CLEAN_EMPTY)
+    {
+        nautilus_folder_tools_clean_empty_async (request->location,
+                                                 request->cancellable,
+                                                 folder_tool_done,
+                                                 request);
+    }
+    else
+    {
+        nautilus_folder_tools_group_media_async (request->location,
+                                                 request->cancellable,
+                                                 folder_tool_done,
+                                                 request);
+    }
+}
+
+static void
+present_folder_tool_confirmation (NautilusFilesView  *view,
+                                  NautilusFile       *file,
+                                  FolderToolOperation operation)
+{
+    FolderToolRequest *request;
+    AdwAlertDialog *dialog;
+    g_autofree char *body = NULL;
+    const char *display_name;
+    const char *title;
+    const char *run_label;
+    GtkWindow *window;
+
+    g_return_if_fail (file_can_use_folder_tools (file));
+
+    window = nautilus_files_view_get_containing_window (view);
+    if (window == NULL)
+    {
+        return;
+    }
+
+    display_name = nautilus_file_get_display_name (file);
+    request = folder_tool_request_new (view, file, operation);
+
+    if (operation == FOLDER_TOOL_CLEAN_EMPTY)
+    {
+        title = _("Clean Empty Folders?");
+        run_label = _("_Clean");
+        body = g_strdup_printf (_("Empty folders inside “%s” will be removed, including nested empty folders. The selected folder will be kept."),
+                                display_name);
+    }
+    else
+    {
+        title = _("Group Media?");
+        run_label = _("_Group Files");
+        body = g_strdup_printf (_("Files directly inside “%s” will be moved into category folders for images, videos, audio, documents, archives, and other files. Existing subfolders will not be changed."),
+                                display_name);
+    }
+
+    dialog = ADW_ALERT_DIALOG (adw_alert_dialog_new (title, body));
+    adw_alert_dialog_add_responses (dialog,
+                                    "cancel", _("_Cancel"),
+                                    "run", run_label,
+                                    NULL);
+    adw_alert_dialog_set_default_response (dialog,
+                                           operation == FOLDER_TOOL_CLEAN_EMPTY ? "cancel" : "run");
+    adw_alert_dialog_set_close_response (dialog, "cancel");
+    adw_alert_dialog_set_response_appearance (dialog,
+                                              "run",
+                                              operation == FOLDER_TOOL_CLEAN_EMPTY ?
+                                              ADW_RESPONSE_DESTRUCTIVE :
+                                              ADW_RESPONSE_SUGGESTED);
+    adw_alert_dialog_choose (dialog,
+                             GTK_WIDGET (window),
+                             NULL,
+                             (GAsyncReadyCallback) folder_tool_confirmation_done,
+                             request);
+}
+
+static void
+action_clean_empty_folders (GSimpleAction *action,
+                            GVariant      *state,
+                            gpointer       user_data)
+{
+    NautilusFilesView *self = NAUTILUS_FILES_VIEW (user_data);
+    g_autolist (NautilusFile) selection = nautilus_files_view_get_selection (self);
+
+    g_return_if_fail (list_len_is_one (selection));
+    present_folder_tool_confirmation (self, selection->data, FOLDER_TOOL_CLEAN_EMPTY);
+}
+
+static void
+action_current_dir_clean_empty_folders (GSimpleAction *action,
+                                        GVariant      *state,
+                                        gpointer       user_data)
+{
+    NautilusFilesView *self = NAUTILUS_FILES_VIEW (user_data);
+
+    present_folder_tool_confirmation (self, self->directory_as_file, FOLDER_TOOL_CLEAN_EMPTY);
+}
+
+static void
+action_group_media (GSimpleAction *action,
+                    GVariant      *state,
+                    gpointer       user_data)
+{
+    NautilusFilesView *self = NAUTILUS_FILES_VIEW (user_data);
+    g_autolist (NautilusFile) selection = nautilus_files_view_get_selection (self);
+
+    g_return_if_fail (list_len_is_one (selection));
+    present_folder_tool_confirmation (self, selection->data, FOLDER_TOOL_GROUP_MEDIA);
+}
+
+static void
+action_current_dir_group_media (GSimpleAction *action,
+                                GVariant      *state,
+                                gpointer       user_data)
+{
+    NautilusFilesView *self = NAUTILUS_FILES_VIEW (user_data);
+
+    present_folder_tool_confirmation (self, self->directory_as_file, FOLDER_TOOL_GROUP_MEDIA);
+}
+
 /* The Home folder (~) can keep its own show-hidden state, independent from
  * every other folder. Returns TRUE when @self is currently showing Home and
  * that independent mode is enabled. */
@@ -3464,6 +3806,12 @@ nautilus_files_view_finalize (GObject *object)
 
     g_cancellable_cancel (self->starred_cancellable);
     g_clear_object (&self->starred_cancellable);
+
+    if (self->folder_tool_cancellable != NULL)
+    {
+        g_cancellable_cancel (self->folder_tool_cancellable);
+    }
+    g_clear_object (&self->folder_tool_cancellable);
 
     G_OBJECT_CLASS (nautilus_files_view_parent_class)->finalize (object);
 }
@@ -7100,6 +7448,10 @@ const GActionEntry view_entries[] =
     { .name = "current-directory-console", .activate = action_current_dir_open_console },
     { .name = "disk-usage-map", .activate = action_disk_usage_map },
     { .name = "current-directory-disk-usage-map", .activate = action_current_dir_disk_usage_map },
+    { .name = "clean-empty-folders", .activate = action_clean_empty_folders },
+    { .name = "current-directory-clean-empty-folders", .activate = action_current_dir_clean_empty_folders },
+    { .name = "group-media", .activate = action_group_media },
+    { .name = "current-directory-group-media", .activate = action_current_dir_group_media },
     { .name = "properties", .activate = action_properties},
     { .name = "current-directory-properties", .activate = action_current_dir_properties},
     { .name = "run-in-terminal", .activate = action_run_in_terminal },
@@ -7880,6 +8232,40 @@ nautilus_files_view_update_actions_state (NautilusFilesView *self)
                                  !selection_contains_starred &&
                                  !is_network_view &&
                                  file_can_show_disk_usage_map (self->directory_as_file));
+    action = g_action_map_lookup_action (G_ACTION_MAP (view_action_group),
+                                         "clean-empty-folders");
+    g_simple_action_set_enabled (G_SIMPLE_ACTION (action),
+                                 mode == NAUTILUS_MODE_BROWSE &&
+                                 self->folder_tool_cancellable == NULL &&
+                                 list_len_is_one (selection) &&
+                                 file_can_use_folder_tools (selection->data));
+    action = g_action_map_lookup_action (G_ACTION_MAP (view_action_group),
+                                         "group-media");
+    g_simple_action_set_enabled (G_SIMPLE_ACTION (action),
+                                 mode == NAUTILUS_MODE_BROWSE &&
+                                 self->folder_tool_cancellable == NULL &&
+                                 list_len_is_one (selection) &&
+                                 file_can_use_folder_tools (selection->data));
+    action = g_action_map_lookup_action (G_ACTION_MAP (view_action_group),
+                                         "current-directory-clean-empty-folders");
+    g_simple_action_set_enabled (G_SIMPLE_ACTION (action),
+                                 mode == NAUTILUS_MODE_BROWSE &&
+                                 self->folder_tool_cancellable == NULL &&
+                                 !selection_contains_recent &&
+                                 !selection_contains_search &&
+                                 !selection_contains_starred &&
+                                 !is_network_view &&
+                                 file_can_use_folder_tools (self->directory_as_file));
+    action = g_action_map_lookup_action (G_ACTION_MAP (view_action_group),
+                                         "current-directory-group-media");
+    g_simple_action_set_enabled (G_SIMPLE_ACTION (action),
+                                 mode == NAUTILUS_MODE_BROWSE &&
+                                 self->folder_tool_cancellable == NULL &&
+                                 !selection_contains_recent &&
+                                 !selection_contains_search &&
+                                 !selection_contains_starred &&
+                                 !is_network_view &&
+                                 file_can_use_folder_tools (self->directory_as_file));
     action = g_action_map_lookup_action (G_ACTION_MAP (view_action_group),
                                          "properties");
     g_simple_action_set_enabled (G_SIMPLE_ACTION (action),

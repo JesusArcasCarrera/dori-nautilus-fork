@@ -57,6 +57,18 @@
     </section>
     <section id="background-extensions-section"/>
     <section id="background-custom-actions-section"/>
+    <section id="background-folder-tools-section">
+      <item>
+        <attribute name="label" translatable="yes">_Clean Empty Folders…</attribute>
+        <attribute name="action">view.current-directory-clean-empty-folders</attribute>
+        <attribute name="hidden-when">action-disabled</attribute>
+      </item>
+      <item>
+        <attribute name="label" translatable="yes">Group _Media…</attribute>
+        <attribute name="action">view.current-directory-group-media</attribute>
+        <attribute name="hidden-when">action-disabled</attribute>
+      </item>
+    </section>
     <section>
       <item>
         <attribute name="label" translatable="yes">Disk Usage _Map…</attribute>
@@ -283,6 +295,18 @@
     </section>
     <section id="selection-extensions-section"/>
     <section id="selection-custom-actions-section"/>
+    <section id="selection-folder-tools-section">
+      <item>
+        <attribute name="label" translatable="yes">_Clean Empty Folders…</attribute>
+        <attribute name="action">view.clean-empty-folders</attribute>
+        <attribute name="hidden-when">action-disabled</attribute>
+      </item>
+      <item>
+        <attribute name="label" translatable="yes">Group _Media…</attribute>
+        <attribute name="action">view.group-media</attribute>
+        <attribute name="hidden-when">action-disabled</attribute>
+      </item>
+    </section>
     <section>
       <item>
         <attribute name="label" translatable="yes">Disk Usage _Map…</attribute>
