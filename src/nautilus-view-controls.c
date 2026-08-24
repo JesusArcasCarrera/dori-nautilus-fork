@@ -42,6 +42,13 @@ on_slot_toolbar_menu_sections_changed (NautilusViewControls *self,
 
     new_sections = nautilus_window_slot_get_toolbar_menu_sections (slot);
 
+    /* Closing the menu through the split button is important here. Making an
+     * open GtkMenuButton insensitive hides its popover directly, without
+     * toggling the button off. On Wayland that can leave the hidden popup's
+     * pointer and keyboard grabs active, making every Nautilus window stop
+     * receiving clicks. */
+    adw_split_button_popdown (ADW_SPLIT_BUTTON (self->view_split_button));
+
     gtk_widget_set_sensitive (self->view_split_button, (new_sections != NULL));
     if (new_sections == NULL)
     {
@@ -82,6 +89,8 @@ nautilus_view_controls_set_window_slot (NautilusViewControls *self,
     {
         return;
     }
+
+    adw_split_button_popdown (ADW_SPLIT_BUTTON (self->view_split_button));
 
     disconnect_toolbar_menu_sections_change_handler (self);
 
