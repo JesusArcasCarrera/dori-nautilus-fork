@@ -35,18 +35,22 @@ main (int   argc,
 {
     g_autoptr (NautilusTagManager) tag_manager = NULL;
 
-    gtk_test_init (&argc, &argv, G_TEST_OPTION_ISOLATE_DIRS, NULL);
+    test_init_config_dir ();
+    gtk_test_init (&argc, &argv, NULL);
 
     nautilus_register_resource ();
     nautilus_ensure_extension_points ();
     nautilus_global_preferences_init ();
     tag_manager = nautilus_tag_manager_new_dummy ();
-    test_init_config_dir ();
 
     g_autoptr (NautilusApplication) app = nautilus_application_new ();
 
     g_test_add_func ("/sidebar/set_location",
                      test_sidebar_set_location);
 
-    return g_test_run ();
+    int result = g_test_run ();
+
+    test_clear_config_dir ();
+
+    return result;
 }

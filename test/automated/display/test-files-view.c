@@ -870,13 +870,13 @@ main (int   argc,
 {
     g_autoptr (NautilusTagManager) tag_manager = NULL;
 
+    test_init_config_dir ();
     gtk_test_init (&argc, &argv, NULL);
 
     nautilus_register_resource ();
     nautilus_ensure_extension_points ();
     nautilus_global_preferences_init ();
     tag_manager = nautilus_tag_manager_new_dummy ();
-    test_init_config_dir ();
 
     g_autoptr (NautilusApplication) app = nautilus_application_new ();
 
@@ -899,5 +899,9 @@ main (int   argc,
     g_test_add_func ("/view/actions/zoom",
                      test_zoom_actions);
 
-    return g_test_run ();
+    int result = g_test_run ();
+
+    test_clear_config_dir ();
+
+    return result;
 }

@@ -43,12 +43,17 @@ test_clear_tmp_dir (void)
 }
 
 static gboolean config_dir_initialized = FALSE;
+static gchar *nautilus_config_dir = NULL;
 
 void
 test_init_config_dir (void)
 {
     if (config_dir_initialized == FALSE)
     {
+        nautilus_config_dir = g_dir_make_tmp ("nautilus-config.XXXXXX", NULL);
+        g_assert_nonnull (nautilus_config_dir);
+        g_setenv ("XDG_CONFIG_HOME", nautilus_config_dir, TRUE);
+
         /* Initialize bookmarks */
         g_autofree gchar *gtk3_dir = g_build_filename (g_get_user_config_dir (),
                                                        "gtk-3.0",
@@ -79,6 +84,20 @@ test_init_config_dir (void)
 
         g_debug ("Initialized config folder %s", g_get_user_config_dir ());
         config_dir_initialized = TRUE;
+    }
+}
+
+void
+test_clear_config_dir (void)
+{
+    if (nautilus_config_dir != NULL)
+    {
+        g_autoptr (GFile) config_dir = g_file_new_for_path (nautilus_config_dir);
+
+        empty_directory_by_prefix (config_dir, "");
+        rmdir (nautilus_config_dir);
+        g_clear_pointer (&nautilus_config_dir, g_free);
+        config_dir_initialized = FALSE;
     }
 }
 

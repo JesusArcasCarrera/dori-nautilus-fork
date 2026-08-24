@@ -281,12 +281,12 @@ main (int   argc,
     g_autoptr (NautilusFileUndoManager) undo_manager = NULL;
     g_autoptr (NautilusTagManager) tag_manager = NULL;
 
+    test_init_config_dir ();
     gtk_test_init (&argc, &argv, NULL);
 
     g_setenv ("RUNNING_TESTS", "TRUE", TRUE);
 
     undo_manager = nautilus_file_undo_manager_new ();
-    test_init_config_dir ();
 
     g_test_add_func ("/create/folder",
                      test_create_folder);
@@ -299,5 +299,9 @@ main (int   argc,
     g_test_add_func ("/create/image/clipboard-texture",
                      test_save_image_from_clipboard);
 
-    return g_test_run ();
+    int result = g_test_run ();
+
+    test_clear_config_dir ();
+
+    return result;
 }

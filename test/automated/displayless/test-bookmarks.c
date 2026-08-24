@@ -90,9 +90,8 @@ int
 main (int   argc,
       char *argv[])
 {
-    g_test_init (&argc, &argv, NULL);
-
     test_init_config_dir ();
+    g_test_init (&argc, &argv, NULL);
     nautilus_ensure_extension_points ();
 
     g_test_add_func ("/bookmarks/basic",
@@ -101,5 +100,9 @@ main (int   argc,
     g_test_add_func ("/bookmark-list/basic",
                      test_bookmark_list_basic);
 
-    return g_test_run ();
+    int result = g_test_run ();
+
+    test_clear_config_dir ();
+
+    return result;
 }
