@@ -288,6 +288,8 @@ typedef enum
 {
     FOLDER_TOOL_CLEAN_EMPTY,
     FOLDER_TOOL_GROUP_MEDIA,
+    FOLDER_TOOL_GROUP_DUPLICATES,
+    FOLDER_TOOL_GROUP_DUPLICATES_DEEP,
 } FolderToolOperation;
 
 typedef struct
@@ -2643,6 +2645,13 @@ show_folder_tool_toast (FolderToolRequest *request,
     }
 }
 
+static gboolean
+folder_tool_groups_duplicates (FolderToolOperation operation)
+{
+    return operation == FOLDER_TOOL_GROUP_DUPLICATES ||
+           operation == FOLDER_TOOL_GROUP_DUPLICATES_DEEP;
+}
+
 static void
 folder_tool_done (GObject      *source_object,
                   GAsyncResult *async_result,
@@ -2677,9 +2686,20 @@ folder_tool_done (GObject      *source_object,
     window = nautilus_files_view_get_containing_window (request->view);
     if (result == NULL)
     {
-        const char *heading = request->operation == FOLDER_TOOL_CLEAN_EMPTY ?
-                              _("Could Not Clean Empty Folders") :
-                              _("Could Not Group Media");
+        const char *heading;
+
+        if (request->operation == FOLDER_TOOL_CLEAN_EMPTY)
+        {
+            heading = _("Could Not Clean Empty Folders");
+        }
+        else if (request->operation == FOLDER_TOOL_GROUP_MEDIA)
+        {
+            heading = _("Could Not Group Media");
+        }
+        else
+        {
+            heading = _("Could Not Group Duplicates");
+        }
 
         if (window != NULL)
         {
@@ -2707,7 +2727,9 @@ folder_tool_done (GObject      *source_object,
         }
         else
         {
-            heading = _("Some Media Could Not Be Grouped");
+            heading = request->operation == FOLDER_TOOL_GROUP_MEDIA ?
+                      _("Some Media Could Not Be Grouped") :
+                      _("Some Duplicates Could Not Be Grouped");
             summary_message = g_strdup_printf (_("Grouped: %u. Failed: %u."),
                                                changed,
                                                failed);
@@ -2736,6 +2758,21 @@ folder_tool_done (GObject      *source_object,
             show_folder_tool_toast (request, message);
         }
     }
+    else if (folder_tool_groups_duplicates (request->operation))
+    {
+        if (changed == 0)
+        {
+            show_folder_tool_toast (request, _("No duplicate files found"));
+        }
+        else
+        {
+            message = g_strdup_printf (ngettext ("%u duplicate file grouped",
+                                                 "%u duplicate files grouped",
+                                                 changed),
+                                       changed);
+            show_folder_tool_toast (request, message);
+        }
+    }
     else if (changed == 0)
     {
         show_folder_tool_toast (request, _("No files to group"));
@@ -2759,6 +2796,7 @@ folder_tool_confirmation_done (AdwAlertDialog *dialog,
 {
     FolderToolRequest *request = user_data;
     const char *response = adw_alert_dialog_choose_finish (dialog, result);
+    const char *progress_label;
     GtkWindow *window;
 
     if (!g_str_equal (response, "run"))
@@ -2780,11 +2818,22 @@ folder_tool_confirmation_done (AdwAlertDialog *dialog,
     schedule_update_context_menus (request->view);
 
     window = nautilus_files_view_get_containing_window (request->view);
+    if (request->operation == FOLDER_TOOL_CLEAN_EMPTY)
+    {
+        progress_label = _("Cleaning empty folders…");
+    }
+    else if (request->operation == FOLDER_TOOL_GROUP_MEDIA)
+    {
+        progress_label = _("Grouping media…");
+    }
+    else
+    {
+        progress_label = _("Finding duplicate files…");
+    }
+
     nautilus_ui_timed_wait_start ((TimedWaitCancelCallback) cancel_folder_tool,
                                   request,
-                                  request->operation == FOLDER_TOOL_CLEAN_EMPTY ?
-                                  _("Cleaning empty folders…") :
-                                  _("Grouping media…"),
+                                  progress_label,
                                   window);
 
     if (request->operation == FOLDER_TOOL_CLEAN_EMPTY)
@@ -2794,12 +2843,21 @@ folder_tool_confirmation_done (AdwAlertDialog *dialog,
                                                  folder_tool_done,
                                                  request);
     }
-    else
+    else if (request->operation == FOLDER_TOOL_GROUP_MEDIA)
     {
         nautilus_folder_tools_group_media_async (request->location,
                                                  request->cancellable,
                                                  folder_tool_done,
                                                  request);
+    }
+    else
+    {
+        nautilus_folder_tools_group_duplicates_async (
+            request->location,
+            request->operation == FOLDER_TOOL_GROUP_DUPLICATES_DEEP,
+            request->cancellable,
+            folder_tool_done,
+            request);
     }
 }
 
@@ -2834,11 +2892,25 @@ present_folder_tool_confirmation (NautilusFilesView  *view,
         body = g_strdup_printf (_("Empty folders inside “%s” will be removed, including nested empty folders. The selected folder will be kept."),
                                 display_name);
     }
-    else
+    else if (operation == FOLDER_TOOL_GROUP_MEDIA)
     {
         title = _("Group Media?");
         run_label = _("_Group Files");
         body = g_strdup_printf (_("Files directly inside “%s” will be moved into category folders for images, videos, audio, documents, archives, and other files. Existing subfolders will not be changed."),
+                                display_name);
+    }
+    else if (operation == FOLDER_TOOL_GROUP_DUPLICATES)
+    {
+        title = _("Group Duplicates?");
+        run_label = _("_Group Duplicates");
+        body = g_strdup_printf (_("Files directly inside “%s” will be compared by SHA-256. Extra copies will be moved to “duplicados”; one copy of each file will be kept. Existing subfolders will not be changed."),
+                                display_name);
+    }
+    else
+    {
+        title = _("Group Duplicates in Subfolders?");
+        run_label = _("_Group Duplicates");
+        body = g_strdup_printf (_("Files inside “%s” and all its subfolders will be compared by SHA-256. Extra copies will be moved to the top-level “duplicados” folder; one copy of each file will be kept."),
                                 display_name);
     }
 
@@ -2904,6 +2976,56 @@ action_current_dir_group_media (GSimpleAction *action,
     NautilusFilesView *self = NAUTILUS_FILES_VIEW (user_data);
 
     present_folder_tool_confirmation (self, self->directory_as_file, FOLDER_TOOL_GROUP_MEDIA);
+}
+
+static void
+action_group_duplicates (GSimpleAction *action,
+                         GVariant      *state,
+                         gpointer       user_data)
+{
+    NautilusFilesView *self = NAUTILUS_FILES_VIEW (user_data);
+    g_autolist (NautilusFile) selection = nautilus_files_view_get_selection (self);
+
+    g_return_if_fail (list_len_is_one (selection));
+    present_folder_tool_confirmation (self, selection->data, FOLDER_TOOL_GROUP_DUPLICATES);
+}
+
+static void
+action_current_dir_group_duplicates (GSimpleAction *action,
+                                     GVariant      *state,
+                                     gpointer       user_data)
+{
+    NautilusFilesView *self = NAUTILUS_FILES_VIEW (user_data);
+
+    present_folder_tool_confirmation (self,
+                                      self->directory_as_file,
+                                      FOLDER_TOOL_GROUP_DUPLICATES);
+}
+
+static void
+action_group_duplicates_deep (GSimpleAction *action,
+                              GVariant      *state,
+                              gpointer       user_data)
+{
+    NautilusFilesView *self = NAUTILUS_FILES_VIEW (user_data);
+    g_autolist (NautilusFile) selection = nautilus_files_view_get_selection (self);
+
+    g_return_if_fail (list_len_is_one (selection));
+    present_folder_tool_confirmation (self,
+                                      selection->data,
+                                      FOLDER_TOOL_GROUP_DUPLICATES_DEEP);
+}
+
+static void
+action_current_dir_group_duplicates_deep (GSimpleAction *action,
+                                          GVariant      *state,
+                                          gpointer       user_data)
+{
+    NautilusFilesView *self = NAUTILUS_FILES_VIEW (user_data);
+
+    present_folder_tool_confirmation (self,
+                                      self->directory_as_file,
+                                      FOLDER_TOOL_GROUP_DUPLICATES_DEEP);
 }
 
 /* The Home folder (~) can keep its own show-hidden state, independent from
@@ -7452,6 +7574,10 @@ const GActionEntry view_entries[] =
     { .name = "current-directory-clean-empty-folders", .activate = action_current_dir_clean_empty_folders },
     { .name = "group-media", .activate = action_group_media },
     { .name = "current-directory-group-media", .activate = action_current_dir_group_media },
+    { .name = "group-duplicates", .activate = action_group_duplicates },
+    { .name = "current-directory-group-duplicates", .activate = action_current_dir_group_duplicates },
+    { .name = "group-duplicates-deep", .activate = action_group_duplicates_deep },
+    { .name = "current-directory-group-duplicates-deep", .activate = action_current_dir_group_duplicates_deep },
     { .name = "properties", .activate = action_properties},
     { .name = "current-directory-properties", .activate = action_current_dir_properties},
     { .name = "run-in-terminal", .activate = action_run_in_terminal },
@@ -8247,6 +8373,20 @@ nautilus_files_view_update_actions_state (NautilusFilesView *self)
                                  list_len_is_one (selection) &&
                                  file_can_use_folder_tools (selection->data));
     action = g_action_map_lookup_action (G_ACTION_MAP (view_action_group),
+                                         "group-duplicates");
+    g_simple_action_set_enabled (G_SIMPLE_ACTION (action),
+                                 mode == NAUTILUS_MODE_BROWSE &&
+                                 self->folder_tool_cancellable == NULL &&
+                                 list_len_is_one (selection) &&
+                                 file_can_use_folder_tools (selection->data));
+    action = g_action_map_lookup_action (G_ACTION_MAP (view_action_group),
+                                         "group-duplicates-deep");
+    g_simple_action_set_enabled (G_SIMPLE_ACTION (action),
+                                 mode == NAUTILUS_MODE_BROWSE &&
+                                 self->folder_tool_cancellable == NULL &&
+                                 list_len_is_one (selection) &&
+                                 file_can_use_folder_tools (selection->data));
+    action = g_action_map_lookup_action (G_ACTION_MAP (view_action_group),
                                          "current-directory-clean-empty-folders");
     g_simple_action_set_enabled (G_SIMPLE_ACTION (action),
                                  mode == NAUTILUS_MODE_BROWSE &&
@@ -8258,6 +8398,26 @@ nautilus_files_view_update_actions_state (NautilusFilesView *self)
                                  file_can_use_folder_tools (self->directory_as_file));
     action = g_action_map_lookup_action (G_ACTION_MAP (view_action_group),
                                          "current-directory-group-media");
+    g_simple_action_set_enabled (G_SIMPLE_ACTION (action),
+                                 mode == NAUTILUS_MODE_BROWSE &&
+                                 self->folder_tool_cancellable == NULL &&
+                                 !selection_contains_recent &&
+                                 !selection_contains_search &&
+                                 !selection_contains_starred &&
+                                 !is_network_view &&
+                                 file_can_use_folder_tools (self->directory_as_file));
+    action = g_action_map_lookup_action (G_ACTION_MAP (view_action_group),
+                                         "current-directory-group-duplicates");
+    g_simple_action_set_enabled (G_SIMPLE_ACTION (action),
+                                 mode == NAUTILUS_MODE_BROWSE &&
+                                 self->folder_tool_cancellable == NULL &&
+                                 !selection_contains_recent &&
+                                 !selection_contains_search &&
+                                 !selection_contains_starred &&
+                                 !is_network_view &&
+                                 file_can_use_folder_tools (self->directory_as_file));
+    action = g_action_map_lookup_action (G_ACTION_MAP (view_action_group),
+                                         "current-directory-group-duplicates-deep");
     g_simple_action_set_enabled (G_SIMPLE_ACTION (action),
                                  mode == NAUTILUS_MODE_BROWSE &&
                                  self->folder_tool_cancellable == NULL &&

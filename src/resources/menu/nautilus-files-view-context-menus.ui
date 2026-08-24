@@ -68,6 +68,16 @@
         <attribute name="action">view.current-directory-group-media</attribute>
         <attribute name="hidden-when">action-disabled</attribute>
       </item>
+      <item>
+        <attribute name="label" translatable="yes">Group _Duplicates…</attribute>
+        <attribute name="action">view.current-directory-group-duplicates</attribute>
+        <attribute name="hidden-when">action-disabled</attribute>
+      </item>
+      <item>
+        <attribute name="label" translatable="yes">Group Duplicates in _Subfolders…</attribute>
+        <attribute name="action">view.current-directory-group-duplicates-deep</attribute>
+        <attribute name="hidden-when">action-disabled</attribute>
+      </item>
     </section>
     <section>
       <item>
@@ -304,6 +314,16 @@
       <item>
         <attribute name="label" translatable="yes">Group _Media…</attribute>
         <attribute name="action">view.group-media</attribute>
+        <attribute name="hidden-when">action-disabled</attribute>
+      </item>
+      <item>
+        <attribute name="label" translatable="yes">Group _Duplicates…</attribute>
+        <attribute name="action">view.group-duplicates</attribute>
+        <attribute name="hidden-when">action-disabled</attribute>
+      </item>
+      <item>
+        <attribute name="label" translatable="yes">Group Duplicates in _Subfolders…</attribute>
+        <attribute name="action">view.group-duplicates-deep</attribute>
         <attribute name="hidden-when">action-disabled</attribute>
       </item>
     </section>

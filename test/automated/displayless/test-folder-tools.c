@@ -157,6 +157,95 @@ test_clean_empty_is_recursive_and_safe (void)
 }
 
 static void
+test_group_duplicates_only_compares_direct_files (void)
+{
+    g_autofree char *root = g_dir_make_tmp ("nautilus-folder-tools-XXXXXX", NULL);
+    g_autofree char *nested = g_build_filename (root, "nested", NULL);
+    g_autofree char *duplicates = g_build_filename (root, "duplicados", NULL);
+    g_autofree char *original = g_build_filename (root, "a.bin", NULL);
+    g_autofree char *duplicate = g_build_filename (root, "b.bin", NULL);
+    g_autofree char *unique = g_build_filename (root, "unique.bin", NULL);
+    g_autofree char *nested_copy = g_build_filename (nested, "nested-copy.bin", NULL);
+    g_autofree char *existing_destination = g_build_filename (duplicates, "b.bin", NULL);
+    g_autofree char *moved_duplicate = g_build_filename (duplicates, "b.bin_1", NULL);
+    g_autofree char *link_path = g_build_filename (root, "linked.bin", NULL);
+    g_autoptr (GFile) location = g_file_new_for_path (root);
+    g_autoptr (NautilusFolderToolsResult) result = NULL;
+    g_autoptr (GError) error = NULL;
+
+    g_assert_nonnull (root);
+    g_assert_cmpint (g_mkdir (nested, 0700), ==, 0);
+    g_assert_cmpint (g_mkdir (duplicates, 0700), ==, 0);
+    create_file (original, "same contents");
+    create_file (duplicate, "same contents");
+    create_file (unique, "different contents");
+    create_file (nested_copy, "same contents");
+    create_file (existing_destination, "occupied name");
+    g_assert_cmpint (symlink (original, link_path), ==, 0);
+
+    result = nautilus_folder_tools_group_duplicates (location, FALSE, NULL, &error);
+
+    g_assert_no_error (error);
+    g_assert_nonnull (result);
+    g_assert_cmpuint (nautilus_folder_tools_result_get_changed (result), ==, 1);
+    g_assert_cmpuint (nautilus_folder_tools_result_get_failed (result), ==, 0);
+    g_assert_true (g_file_test (original, G_FILE_TEST_IS_REGULAR));
+    g_assert_false (g_file_test (duplicate, G_FILE_TEST_EXISTS));
+    g_assert_true (g_file_test (moved_duplicate, G_FILE_TEST_IS_REGULAR));
+    g_assert_true (g_file_test (existing_destination, G_FILE_TEST_IS_REGULAR));
+    g_assert_true (g_file_test (nested_copy, G_FILE_TEST_IS_REGULAR));
+    g_assert_true (g_file_test (unique, G_FILE_TEST_IS_REGULAR));
+    g_assert_true (g_file_test (link_path, G_FILE_TEST_IS_SYMLINK));
+
+    remove_tree (root);
+}
+
+static void
+test_group_duplicates_deep_scans_subfolders (void)
+{
+    g_autofree char *root = g_dir_make_tmp ("nautilus-folder-tools-XXXXXX", NULL);
+    g_autofree char *nested = g_build_filename (root, "nested", NULL);
+    g_autofree char *deeper = g_build_filename (nested, "deeper", NULL);
+    g_autofree char *duplicates = g_build_filename (root, "duplicados", NULL);
+    g_autofree char *original = g_build_filename (root, "original.bin", NULL);
+    g_autofree char *nested_copy = g_build_filename (nested, "copy.bin", NULL);
+    g_autofree char *deep_copy = g_build_filename (deeper, "deep-copy.bin", NULL);
+    g_autofree char *ignored_copy = g_build_filename (duplicates, "ignored.bin", NULL);
+    g_autofree char *moved_nested = g_build_filename (duplicates, "copy.bin", NULL);
+    g_autofree char *moved_deep = g_build_filename (duplicates, "deep-copy.bin", NULL);
+    g_autofree char *link_path = g_build_filename (nested, "linked.bin", NULL);
+    g_autoptr (GFile) location = g_file_new_for_path (root);
+    g_autoptr (NautilusFolderToolsResult) result = NULL;
+    g_autoptr (GError) error = NULL;
+
+    g_assert_nonnull (root);
+    g_assert_cmpint (g_mkdir (nested, 0700), ==, 0);
+    g_assert_cmpint (g_mkdir (deeper, 0700), ==, 0);
+    g_assert_cmpint (g_mkdir (duplicates, 0700), ==, 0);
+    create_file (original, "same contents");
+    create_file (nested_copy, "same contents");
+    create_file (deep_copy, "same contents");
+    create_file (ignored_copy, "same contents");
+    g_assert_cmpint (symlink (original, link_path), ==, 0);
+
+    result = nautilus_folder_tools_group_duplicates (location, TRUE, NULL, &error);
+
+    g_assert_no_error (error);
+    g_assert_nonnull (result);
+    g_assert_cmpuint (nautilus_folder_tools_result_get_changed (result), ==, 2);
+    g_assert_cmpuint (nautilus_folder_tools_result_get_failed (result), ==, 0);
+    g_assert_true (g_file_test (original, G_FILE_TEST_IS_REGULAR));
+    g_assert_false (g_file_test (nested_copy, G_FILE_TEST_EXISTS));
+    g_assert_false (g_file_test (deep_copy, G_FILE_TEST_EXISTS));
+    g_assert_true (g_file_test (moved_nested, G_FILE_TEST_IS_REGULAR));
+    g_assert_true (g_file_test (moved_deep, G_FILE_TEST_IS_REGULAR));
+    g_assert_true (g_file_test (ignored_copy, G_FILE_TEST_IS_REGULAR));
+    g_assert_true (g_file_test (link_path, G_FILE_TEST_IS_SYMLINK));
+
+    remove_tree (root);
+}
+
+static void
 test_operations_honor_cancellation (void)
 {
     g_autofree char *root = g_dir_make_tmp ("nautilus-folder-tools-XXXXXX", NULL);
@@ -216,6 +305,41 @@ test_async_wrapper_returns_result (void)
     remove_tree (root);
 }
 
+static void
+test_group_duplicates_async_uses_recursive_scope (void)
+{
+    g_autofree char *root = g_dir_make_tmp ("nautilus-folder-tools-XXXXXX", NULL);
+    g_autofree char *nested = g_build_filename (root, "nested", NULL);
+    g_autofree char *original = g_build_filename (root, "original.bin", NULL);
+    g_autofree char *copy = g_build_filename (nested, "copy.bin", NULL);
+    g_autofree char *destination = g_build_filename (root, "duplicados", "copy.bin", NULL);
+    g_autoptr (GFile) location = g_file_new_for_path (root);
+    g_autoptr (GMainLoop) loop = g_main_loop_new (NULL, FALSE);
+    g_autoptr (NautilusFolderToolsResult) result = NULL;
+    g_autoptr (GError) error = NULL;
+    AsyncResultData data = { .loop = loop };
+
+    g_assert_nonnull (root);
+    g_assert_cmpint (g_mkdir (nested, 0700), ==, 0);
+    create_file (original, "same contents");
+    create_file (copy, "same contents");
+
+    nautilus_folder_tools_group_duplicates_async (location,
+                                                   TRUE,
+                                                   NULL,
+                                                   group_media_done,
+                                                   &data);
+    g_main_loop_run (loop);
+
+    result = g_steal_pointer (&data.result);
+    error = g_steal_pointer (&data.error);
+    g_assert_no_error (error);
+    g_assert_nonnull (result);
+    g_assert_cmpuint (nautilus_folder_tools_result_get_changed (result), ==, 1);
+    g_assert_true (g_file_test (destination, G_FILE_TEST_IS_REGULAR));
+    remove_tree (root);
+}
+
 int
 main (int   argc,
       char *argv[])
@@ -225,8 +349,11 @@ main (int   argc,
     g_test_add_func ("/folder-tools/categories/match-script", test_categories_match_script);
     g_test_add_func ("/folder-tools/group/direct-files", test_group_media_only_moves_direct_files);
     g_test_add_func ("/folder-tools/clean/recursive-safe", test_clean_empty_is_recursive_and_safe);
+    g_test_add_func ("/folder-tools/duplicates/direct-files", test_group_duplicates_only_compares_direct_files);
+    g_test_add_func ("/folder-tools/duplicates/deep", test_group_duplicates_deep_scans_subfolders);
     g_test_add_func ("/folder-tools/cancellation", test_operations_honor_cancellation);
     g_test_add_func ("/folder-tools/async/result", test_async_wrapper_returns_result);
+    g_test_add_func ("/folder-tools/async/duplicates-deep", test_group_duplicates_async_uses_recursive_scope);
 
     return g_test_run ();
 }

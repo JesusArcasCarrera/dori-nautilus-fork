@@ -13920,3 +13920,56 @@ msgstr "_Limpiar carpetas vacías…"
 #: src/resources/menu/nautilus-files-view-context-menus.ui
 msgid "Group _Media…"
 msgstr "Agrupar _medios…"
+
+#: src/nautilus-files-view.c
+msgid "Could Not Group Duplicates"
+msgstr "No se pudieron agrupar los duplicados"
+
+#: src/nautilus-files-view.c
+msgid "Finding duplicate files…"
+msgstr "Buscando archivos duplicados…"
+
+#: src/nautilus-files-view.c
+#, c-format
+msgid "Files directly inside “%s” will be compared by SHA-256. Extra copies will be moved to “duplicados”; one copy of each file will be kept. Existing subfolders will not be changed."
+msgstr "Se compararán mediante SHA-256 los archivos que están directamente dentro de «%s». Las copias adicionales se moverán a «duplicados»; se conservará una copia de cada archivo. Las subcarpetas existentes no se modificarán."
+
+#: src/nautilus-files-view.c
+#, c-format
+msgid "Files inside “%s” and all its subfolders will be compared by SHA-256. Extra copies will be moved to the top-level “duplicados” folder; one copy of each file will be kept."
+msgstr "Se compararán mediante SHA-256 los archivos dentro de «%s» y de todas sus subcarpetas. Las copias adicionales se moverán a la carpeta «duplicados» del nivel superior; se conservará una copia de cada archivo."
+
+#: src/nautilus-files-view.c
+msgid "Group Duplicates?"
+msgstr "¿Agrupar los duplicados?"
+
+#: src/nautilus-files-view.c
+msgid "Group Duplicates in Subfolders?"
+msgstr "¿Agrupar duplicados en las subcarpetas?"
+
+#: src/nautilus-files-view.c
+msgid "No duplicate files found"
+msgstr "No se encontraron archivos duplicados"
+
+#: src/nautilus-files-view.c
+msgid "Some Duplicates Could Not Be Grouped"
+msgstr "No se pudieron agrupar algunos duplicados"
+
+#: src/nautilus-files-view.c
+msgid "_Group Duplicates"
+msgstr "_Agrupar duplicados"
+
+#: src/nautilus-files-view.c
+#, c-format
+msgid "%u duplicate file grouped"
+msgid_plural "%u duplicate files grouped"
+msgstr[0] "Se agrupó %u archivo duplicado"
+msgstr[1] "Se agruparon %u archivos duplicados"
+
+#: src/resources/menu/nautilus-files-view-context-menus.ui
+msgid "Group _Duplicates…"
+msgstr "Agrupar _duplicados…"
+
+#: src/resources/menu/nautilus-files-view-context-menus.ui
+msgid "Group Duplicates in _Subfolders…"
+msgstr "Agrupar duplicados a _fondo…"
