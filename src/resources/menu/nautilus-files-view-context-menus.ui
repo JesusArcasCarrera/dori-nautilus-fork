@@ -58,26 +58,31 @@
     <section id="background-extensions-section"/>
     <section id="background-custom-actions-section"/>
     <section id="background-folder-tools-section">
-      <item>
-        <attribute name="label" translatable="yes">_Clean Empty Folders…</attribute>
-        <attribute name="action">view.current-directory-clean-empty-folders</attribute>
-        <attribute name="hidden-when">action-disabled</attribute>
-      </item>
-      <item>
-        <attribute name="label" translatable="yes">Group _Media…</attribute>
-        <attribute name="action">view.current-directory-group-media</attribute>
-        <attribute name="hidden-when">action-disabled</attribute>
-      </item>
-      <item>
-        <attribute name="label" translatable="yes">Group _Duplicates…</attribute>
-        <attribute name="action">view.current-directory-group-duplicates</attribute>
-        <attribute name="hidden-when">action-disabled</attribute>
-      </item>
-      <item>
-        <attribute name="label" translatable="yes">Group Duplicates in _Subfolders…</attribute>
-        <attribute name="action">view.current-directory-group-duplicates-deep</attribute>
-        <attribute name="hidden-when">action-disabled</attribute>
-      </item>
+      <submenu>
+        <attribute name="label" translatable="yes">_Clean</attribute>
+        <section>
+          <item>
+            <attribute name="label" translatable="yes">_Clean Empty Folders…</attribute>
+            <attribute name="action">view.current-directory-clean-empty-folders</attribute>
+            <attribute name="hidden-when">action-disabled</attribute>
+          </item>
+          <item>
+            <attribute name="label" translatable="yes">Group _Media…</attribute>
+            <attribute name="action">view.current-directory-group-media</attribute>
+            <attribute name="hidden-when">action-disabled</attribute>
+          </item>
+          <item>
+            <attribute name="label" translatable="yes">Group _Duplicates…</attribute>
+            <attribute name="action">view.current-directory-group-duplicates</attribute>
+            <attribute name="hidden-when">action-disabled</attribute>
+          </item>
+          <item>
+            <attribute name="label" translatable="yes">Group Duplicates in _Subfolders…</attribute>
+            <attribute name="action">view.current-directory-group-duplicates-deep</attribute>
+            <attribute name="hidden-when">action-disabled</attribute>
+          </item>
+        </section>
+      </submenu>
     </section>
     <section>
       <item>
@@ -306,26 +311,31 @@
     <section id="selection-extensions-section"/>
     <section id="selection-custom-actions-section"/>
     <section id="selection-folder-tools-section">
-      <item>
-        <attribute name="label" translatable="yes">_Clean Empty Folders…</attribute>
-        <attribute name="action">view.clean-empty-folders</attribute>
-        <attribute name="hidden-when">action-disabled</attribute>
-      </item>
-      <item>
-        <attribute name="label" translatable="yes">Group _Media…</attribute>
-        <attribute name="action">view.group-media</attribute>
-        <attribute name="hidden-when">action-disabled</attribute>
-      </item>
-      <item>
-        <attribute name="label" translatable="yes">Group _Duplicates…</attribute>
-        <attribute name="action">view.group-duplicates</attribute>
-        <attribute name="hidden-when">action-disabled</attribute>
-      </item>
-      <item>
-        <attribute name="label" translatable="yes">Group Duplicates in _Subfolders…</attribute>
-        <attribute name="action">view.group-duplicates-deep</attribute>
-        <attribute name="hidden-when">action-disabled</attribute>
-      </item>
+      <submenu>
+        <attribute name="label" translatable="yes">_Clean</attribute>
+        <section>
+          <item>
+            <attribute name="label" translatable="yes">_Clean Empty Folders…</attribute>
+            <attribute name="action">view.clean-empty-folders</attribute>
+            <attribute name="hidden-when">action-disabled</attribute>
+          </item>
+          <item>
+            <attribute name="label" translatable="yes">Group _Media…</attribute>
+            <attribute name="action">view.group-media</attribute>
+            <attribute name="hidden-when">action-disabled</attribute>
+          </item>
+          <item>
+            <attribute name="label" translatable="yes">Group _Duplicates…</attribute>
+            <attribute name="action">view.group-duplicates</attribute>
+            <attribute name="hidden-when">action-disabled</attribute>
+          </item>
+          <item>
+            <attribute name="label" translatable="yes">Group Duplicates in _Subfolders…</attribute>
+            <attribute name="action">view.group-duplicates-deep</attribute>
+            <attribute name="hidden-when">action-disabled</attribute>
+          </item>
+        </section>
+      </submenu>
     </section>
     <section>
       <item>
