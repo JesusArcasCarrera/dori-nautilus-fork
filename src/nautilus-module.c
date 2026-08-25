@@ -56,6 +56,7 @@ struct _NautilusModuleClass
 
 static GList *module_objects = NULL;
 static GList *installed_modules = NULL;
+static GHashTable *loaded_module_names = NULL;
 
 static GType nautilus_module_get_type (void);
 
@@ -148,7 +149,7 @@ add_module_objects (NautilusModule *module)
     }
 }
 
-static void
+static gboolean
 nautilus_module_load_file (const char *filename)
 {
     NautilusModule *module;
@@ -160,12 +161,14 @@ nautilus_module_load_file (const char *filename)
     {
         add_module_objects (module);
         installed_modules = g_list_prepend (installed_modules, module);
-        return;
+        return TRUE;
     }
     else
     {
         g_object_unref (module);
     }
+
+    return FALSE;
 }
 
 char *
@@ -202,10 +205,18 @@ load_module_dir (const char *dirname)
             {
                 char *filename;
 
+                if (g_hash_table_contains (loaded_module_names, name))
+                {
+                    continue;
+                }
+
                 filename = g_build_filename (dirname,
                                              name,
                                              NULL);
-                nautilus_module_load_file (filename);
+                if (nautilus_module_load_file (filename))
+                {
+                    g_hash_table_add (loaded_module_names, g_strdup (name));
+                }
                 g_free (filename);
             }
         }
@@ -235,6 +246,7 @@ nautilus_module_teardown (void)
 
     /* We can't actually free the modules themselves. */
     g_clear_pointer (&installed_modules, g_list_free);
+    g_clear_pointer (&loaded_module_names, g_hash_table_unref);
 }
 
 void
@@ -253,8 +265,19 @@ nautilus_module_setup (void)
     if (!initialized)
     {
         initialized = TRUE;
+        loaded_module_names = g_hash_table_new_full (g_str_hash, g_str_equal,
+                                                      g_free, NULL);
 
         load_module_dir (NAUTILUS_EXTENSIONDIR);
+
+        /* Local-prefix builds still need the extensions supplied by the host
+         * distribution. Prefer a module installed under the configured prefix
+         * and fill only missing module names from the system directory. */
+        if (g_strcmp0 (NAUTILUS_EXTENSIONDIR,
+                       NAUTILUS_SYSTEM_EXTENSIONDIR) != 0)
+        {
+            load_module_dir (NAUTILUS_SYSTEM_EXTENSIONDIR);
+        }
     }
 }
 
