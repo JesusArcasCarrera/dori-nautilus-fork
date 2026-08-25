@@ -7008,11 +7008,6 @@ msgstr "Submenú / Grupo (opcional)"
 #~ msgid "C_ancel"
 #~ msgstr "Cancelar"
 
-# src/nautilus-location-bar.c:401
-#, fuzzy
-#~ msgid "Other Locations"
-#~ msgstr "Otras ubicaciones"
-
 #, fuzzy
 #~ msgid "Do you want to empty the trash before you unmount?"
 #~ msgstr "¿Quieres vaciar la papelera antes de desmontarla?"
@@ -13754,6 +13749,19 @@ msgstr "Intentar de nuevo"
 #~ msgstr ""
 #~ "Nautilus es un shell gráfico para GNOME que facilita la administración de "
 #~ "sus archivos y el resto de su sistema."
+
+#: src/nautilus-sidebar.c:1019
+#: src/resources/ui/nautilus-preferences-dialog.blp:172
+msgid "Other Locations"
+msgstr "Otras ubicaciones"
+
+#: src/resources/ui/nautilus-preferences-dialog.blp:144
+msgid "_Other Locations"
+msgstr "_Otras ubicaciones"
+
+#: src/nautilus-sidebar.c:1022
+msgid "Show local drives and remote shares"
+msgstr "Mostrar unidades locales y recursos compartidos remotos"
 
 #: src/nautilus-disk-usage-model.c
 msgid "The selected item is not a folder"
