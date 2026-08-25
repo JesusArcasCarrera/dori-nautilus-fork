@@ -24,6 +24,7 @@
 #include "nautilus-module.h"
 
 #include <gmodule.h>
+#include <libintl.h>
 
 #define NAUTILUS_TYPE_MODULE            (nautilus_module_get_type ())
 #define NAUTILUS_MODULE(obj)            (G_TYPE_CHECK_INSTANCE_CAST ((obj), NAUTILUS_TYPE_MODULE, NautilusModule))
@@ -95,6 +96,14 @@ nautilus_module_load (GTypeModule *gmodule)
 
     g_module_make_resident (module->library);
     module->initialize (gmodule);
+
+    /* Extensions share the process-wide gettext domain bindings. Some system
+     * extensions are built with GETTEXT_PACKAGE set to "nautilus" and reset
+     * that domain to the distribution prefix while they initialize. Restore
+     * our own catalog path so local-prefix builds keep using their matching
+     * translations. */
+    bindtextdomain (GETTEXT_PACKAGE, LOCALEDIR);
+    bind_textdomain_codeset (GETTEXT_PACKAGE, "UTF-8");
 
     return TRUE;
 }
