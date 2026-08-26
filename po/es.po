@@ -5097,6 +5097,10 @@ msgstr "_Ejecutar como un programa"
 msgid "_Open Item Location"
 msgstr "Abrir la ub_icación del elemento"
 
+#: src/resources/menu/nautilus-files-view-context-menus.ui:165
+msgid "Open Link Target _Location"
+msgstr "Abrir la _ubicación del original"
+
 #: src/resources/menu/nautilus-files-view-context-menus.ui:135
 msgid "_Scripts"
 msgstr "_Scripts"
@@ -13981,3 +13985,52 @@ msgstr "Agrupar _duplicados…"
 #: src/resources/menu/nautilus-files-view-context-menus.ui
 msgid "Group Duplicates in _Subfolders…"
 msgstr "Agrupar duplicados a _fondo…"
+
+#: src/nautilus-folder-tools.c
+msgid "Folders containing version-control metadata cannot be flattened."
+msgstr "No se pueden aplanar carpetas que contienen metadatos de control de versiones."
+
+#: src/nautilus-files-view.c
+msgid "Could Not Flatten Folder Contents"
+msgstr "No se pudo aplanar el contenido de la carpeta"
+
+#: src/nautilus-files-view.c
+msgid "Some Files Could Not Be Moved"
+msgstr "No se pudieron mover algunos archivos"
+
+#: src/nautilus-files-view.c
+#, c-format
+msgid "Moved: %u. Failed: %u."
+msgstr "Movidos: %u. Fallidos: %u."
+
+#: src/nautilus-files-view.c
+msgid "No files found in subfolders"
+msgstr "No se encontraron archivos en las subcarpetas"
+
+#: src/nautilus-files-view.c
+#, c-format
+msgid "%u file moved to the top level"
+msgid_plural "%u files moved to the top level"
+msgstr[0] "Se movió %u archivo al nivel superior"
+msgstr[1] "Se movieron %u archivos al nivel superior"
+
+#: src/nautilus-files-view.c
+msgid "Flattening folder contents…"
+msgstr "Aplanando el contenido de la carpeta…"
+
+#: src/nautilus-files-view.c
+msgid "Flatten Folder Contents?"
+msgstr "¿Aplanar el contenido de la carpeta?"
+
+#: src/nautilus-files-view.c
+msgid "_Flatten"
+msgstr "_Aplanar"
+
+#: src/nautilus-files-view.c
+#, c-format
+msgid "Regular files inside subfolders of “%s” will be moved into “%s”. Existing files will not be overwritten, folders and symbolic links will be kept, and version-controlled folders will be protected."
+msgstr "Los archivos normales dentro de las subcarpetas de «%s» se moverán a «%s». No se sobrescribirán archivos existentes, se conservarán las carpetas y los enlaces simbólicos, y se protegerán las carpetas con control de versiones."
+
+#: src/resources/menu/nautilus-files-view-context-menus.ui
+msgid "_Flatten Contents…"
+msgstr "_Aplanar contenido…"

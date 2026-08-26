@@ -67,6 +67,11 @@
             <attribute name="hidden-when">action-disabled</attribute>
           </item>
           <item>
+            <attribute name="label" translatable="yes">_Flatten Contents…</attribute>
+            <attribute name="action">view.current-directory-flatten</attribute>
+            <attribute name="hidden-when">action-disabled</attribute>
+          </item>
+          <item>
             <attribute name="label" translatable="yes">Group _Media…</attribute>
             <attribute name="action">view.current-directory-group-media</attribute>
             <attribute name="hidden-when">action-disabled</attribute>
@@ -160,6 +165,11 @@
       <item>
         <attribute name="label" translatable="yes">_Open Item Location</attribute>
         <attribute name="action">view.open-item-location</attribute>
+        <attribute name="hidden-when">action-disabled</attribute>
+      </item>
+      <item>
+        <attribute name="label" translatable="yes">Open Link Target _Location</attribute>
+        <attribute name="action">view.open-link-target-location</attribute>
         <attribute name="hidden-when">action-disabled</attribute>
       </item>
       <submenu>
@@ -317,6 +327,11 @@
           <item>
             <attribute name="label" translatable="yes">_Clean Empty Folders…</attribute>
             <attribute name="action">view.clean-empty-folders</attribute>
+            <attribute name="hidden-when">action-disabled</attribute>
+          </item>
+          <item>
+            <attribute name="label" translatable="yes">_Flatten Contents…</attribute>
+            <attribute name="action">view.flatten</attribute>
             <attribute name="hidden-when">action-disabled</attribute>
           </item>
           <item>

@@ -1,4 +1,5 @@
 #include <glib.h>
+#include <unistd.h>
 
 #include <nautilus-directory-private.h>
 #include <nautilus-file.h>
@@ -88,6 +89,74 @@ test_file_sort_with_self (void)
 
     order = nautilus_file_compare_for_sort (file_1, file_1, sort_type, FALSE, FALSE);
     g_assert_cmpint (order, ==, 0);
+}
+
+static void
+test_file_symbolic_link_target_relative (void)
+{
+    g_autofree char *target_directory = g_build_filename (test_get_tmp_dir (), "targets", NULL);
+    g_autofree char *link_directory = g_build_filename (test_get_tmp_dir (), "links", NULL);
+    g_autofree char *target_path = g_build_filename (target_directory, "original.txt", NULL);
+    g_autofree char *link_path = g_build_filename (link_directory, "shortcut", NULL);
+    g_autoptr (GFile) target_location = NULL;
+    g_autoptr (GFile) link_location = NULL;
+    g_autoptr (GFileOutputStream) stream = NULL;
+    g_autoptr (NautilusFile) link_file = NULL;
+    g_autofree char *expected_uri = NULL;
+    g_autofree char *target_uri = NULL;
+
+    g_assert_cmpint (g_mkdir_with_parents (target_directory, 0700), ==, 0);
+    g_assert_cmpint (g_mkdir_with_parents (link_directory, 0700), ==, 0);
+
+    target_location = g_file_new_for_path (target_path);
+    stream = g_file_create (target_location, G_FILE_CREATE_NONE, NULL, NULL);
+    g_assert_nonnull (stream);
+    g_assert_true (g_output_stream_close (G_OUTPUT_STREAM (stream), NULL, NULL));
+    g_clear_object (&stream);
+
+    g_assert_cmpint (symlink ("../targets/original.txt", link_path), ==, 0);
+
+    link_location = g_file_new_for_path (link_path);
+    link_file = nautilus_file_get (link_location);
+    file_load_attributes (link_file, NAUTILUS_FILE_ATTRIBUTE_INFO);
+
+    g_assert_true (nautilus_file_is_symbolic_link (link_file));
+    g_assert_false (nautilus_file_is_broken_symbolic_link (link_file));
+
+    expected_uri = g_file_get_uri (target_location);
+    target_uri = nautilus_file_get_symbolic_link_target_uri (link_file);
+    g_assert_cmpstr (target_uri, ==, expected_uri);
+
+    test_clear_tmp_dir ();
+}
+
+static void
+test_file_symbolic_link_target_broken (void)
+{
+    g_autofree char *link_path = g_build_filename (test_get_tmp_dir (), "broken-link", NULL);
+    g_autoptr (GFile) link_location = NULL;
+    g_autoptr (GFile) link_parent = NULL;
+    g_autoptr (GFile) expected_target = NULL;
+    g_autoptr (NautilusFile) link_file = NULL;
+    g_autofree char *expected_uri = NULL;
+    g_autofree char *target_uri = NULL;
+
+    g_assert_cmpint (symlink ("missing.txt", link_path), ==, 0);
+
+    link_location = g_file_new_for_path (link_path);
+    link_file = nautilus_file_get (link_location);
+    file_load_attributes (link_file, NAUTILUS_FILE_ATTRIBUTE_INFO);
+
+    g_assert_true (nautilus_file_is_symbolic_link (link_file));
+    g_assert_true (nautilus_file_is_broken_symbolic_link (link_file));
+
+    link_parent = g_file_get_parent (link_location);
+    expected_target = g_file_get_child (link_parent, "missing.txt");
+    expected_uri = g_file_get_uri (expected_target);
+    target_uri = nautilus_file_get_symbolic_link_target_uri (link_file);
+    g_assert_cmpstr (target_uri, ==, expected_uri);
+
+    test_clear_tmp_dir ();
 }
 
 typedef struct
@@ -471,6 +540,10 @@ main (int   argc,
                      test_file_sort_order);
     g_test_add_func ("/file-sort/with-self",
                      test_file_sort_with_self);
+    g_test_add_func ("/file/symbolic-link/relative-target",
+                     test_file_symbolic_link_target_relative);
+    g_test_add_func ("/file/symbolic-link/broken-target",
+                     test_file_symbolic_link_target_broken);
     g_test_add_func ("/file-batch-rename/cycles",
                      test_file_batch_rename_cycles);
     g_test_add_func ("/file-batch-rename/chains",

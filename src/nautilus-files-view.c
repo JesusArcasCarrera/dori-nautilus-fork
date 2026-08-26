@@ -287,6 +287,7 @@ typedef struct
 typedef enum
 {
     FOLDER_TOOL_CLEAN_EMPTY,
+    FOLDER_TOOL_FLATTEN,
     FOLDER_TOOL_GROUP_MEDIA,
     FOLDER_TOOL_GROUP_DUPLICATES,
     FOLDER_TOOL_GROUP_DUPLICATES_DEEP,
@@ -1430,6 +1431,46 @@ action_open_item_location (GSimpleAction *action,
     nautilus_file_unref (parent);
     nautilus_file_unref (activation_file);
     g_object_unref (activation_location);
+}
+
+static void
+action_open_link_target_location (GSimpleAction *action,
+                                  GVariant      *state,
+                                  gpointer       user_data)
+{
+    NautilusFilesView *self = user_data;
+    g_autolist (NautilusFile) selection = NULL;
+    g_autofree char *target_uri = NULL;
+    g_autoptr (GFile) target_location = NULL;
+    g_autoptr (GFile) parent_location = NULL;
+    g_autoptr (NautilusFile) target_file = NULL;
+
+    selection = nautilus_files_view_get_selection (self);
+
+    if (!list_len_is_one (selection))
+    {
+        return;
+    }
+
+    target_uri = nautilus_file_get_symbolic_link_target_uri (selection->data);
+    if (target_uri == NULL)
+    {
+        return;
+    }
+
+    target_location = g_file_new_for_uri (target_uri);
+    parent_location = g_file_get_parent (target_location);
+
+    if (parent_location == NULL)
+    {
+        nautilus_window_slot_open_location_full (self->slot, target_location, NULL);
+        return;
+    }
+
+    target_file = nautilus_file_get (target_location);
+    nautilus_window_slot_open_location_full (self->slot,
+                                             parent_location,
+                                             &(NautilusFileList){ .data = target_file });
 }
 
 static void
@@ -2692,6 +2733,10 @@ folder_tool_done (GObject      *source_object,
         {
             heading = _("Could Not Clean Empty Folders");
         }
+        else if (request->operation == FOLDER_TOOL_FLATTEN)
+        {
+            heading = _("Could Not Flatten Folder Contents");
+        }
         else if (request->operation == FOLDER_TOOL_GROUP_MEDIA)
         {
             heading = _("Could Not Group Media");
@@ -2725,6 +2770,13 @@ folder_tool_done (GObject      *source_object,
                                                changed,
                                                failed);
         }
+        else if (request->operation == FOLDER_TOOL_FLATTEN)
+        {
+            heading = _("Some Files Could Not Be Moved");
+            summary_message = g_strdup_printf (_("Moved: %u. Failed: %u."),
+                                               changed,
+                                               failed);
+        }
         else
         {
             heading = request->operation == FOLDER_TOOL_GROUP_MEDIA ?
@@ -2753,6 +2805,21 @@ folder_tool_done (GObject      *source_object,
         {
             message = g_strdup_printf (ngettext ("%u empty folder removed",
                                                  "%u empty folders removed",
+                                                 changed),
+                                       changed);
+            show_folder_tool_toast (request, message);
+        }
+    }
+    else if (request->operation == FOLDER_TOOL_FLATTEN)
+    {
+        if (changed == 0)
+        {
+            show_folder_tool_toast (request, _("No files found in subfolders"));
+        }
+        else
+        {
+            message = g_strdup_printf (ngettext ("%u file moved to the top level",
+                                                 "%u files moved to the top level",
                                                  changed),
                                        changed);
             show_folder_tool_toast (request, message);
@@ -2822,6 +2889,10 @@ folder_tool_confirmation_done (AdwAlertDialog *dialog,
     {
         progress_label = _("Cleaning empty folders…");
     }
+    else if (request->operation == FOLDER_TOOL_FLATTEN)
+    {
+        progress_label = _("Flattening folder contents…");
+    }
     else if (request->operation == FOLDER_TOOL_GROUP_MEDIA)
     {
         progress_label = _("Grouping media…");
@@ -2842,6 +2913,13 @@ folder_tool_confirmation_done (AdwAlertDialog *dialog,
                                                  request->cancellable,
                                                  folder_tool_done,
                                                  request);
+    }
+    else if (request->operation == FOLDER_TOOL_FLATTEN)
+    {
+        nautilus_folder_tools_flatten_async (request->location,
+                                             request->cancellable,
+                                             folder_tool_done,
+                                             request);
     }
     else if (request->operation == FOLDER_TOOL_GROUP_MEDIA)
     {
@@ -2890,6 +2968,14 @@ present_folder_tool_confirmation (NautilusFilesView  *view,
         title = _("Clean Empty Folders?");
         run_label = _("_Clean");
         body = g_strdup_printf (_("Empty folders inside “%s” will be removed, including nested empty folders. The selected folder will be kept."),
+                                display_name);
+    }
+    else if (operation == FOLDER_TOOL_FLATTEN)
+    {
+        title = _("Flatten Folder Contents?");
+        run_label = _("_Flatten");
+        body = g_strdup_printf (_("Regular files inside subfolders of “%s” will be moved into “%s”. Existing files will not be overwritten, folders and symbolic links will be kept, and version-controlled folders will be protected."),
+                                display_name,
                                 display_name);
     }
     else if (operation == FOLDER_TOOL_GROUP_MEDIA)
@@ -2954,6 +3040,28 @@ action_current_dir_clean_empty_folders (GSimpleAction *action,
     NautilusFilesView *self = NAUTILUS_FILES_VIEW (user_data);
 
     present_folder_tool_confirmation (self, self->directory_as_file, FOLDER_TOOL_CLEAN_EMPTY);
+}
+
+static void
+action_flatten (GSimpleAction *action,
+                GVariant      *state,
+                gpointer       user_data)
+{
+    NautilusFilesView *self = NAUTILUS_FILES_VIEW (user_data);
+    g_autolist (NautilusFile) selection = nautilus_files_view_get_selection (self);
+
+    g_return_if_fail (list_len_is_one (selection));
+    present_folder_tool_confirmation (self, selection->data, FOLDER_TOOL_FLATTEN);
+}
+
+static void
+action_current_dir_flatten (GSimpleAction *action,
+                            GVariant      *state,
+                            gpointer       user_data)
+{
+    NautilusFilesView *self = NAUTILUS_FILES_VIEW (user_data);
+
+    present_folder_tool_confirmation (self, self->directory_as_file, FOLDER_TOOL_FLATTEN);
 }
 
 static void
@@ -7527,6 +7635,7 @@ const GActionEntry view_entries[] =
     { .name = "new-folder-with-selection", .activate = action_new_folder_with_selection },
     { .name = "open-scripts-folder", .activate = action_open_scripts_folder },
     { .name = "open-item-location", .activate = action_open_item_location },
+    { .name = "open-link-target-location", .activate = action_open_link_target_location },
     { .name = "open-with-default-application", .activate = action_open_with_default_application },
     { .name = "open-with-other-application", .activate = action_open_with_other_application },
     {
@@ -7572,6 +7681,8 @@ const GActionEntry view_entries[] =
     { .name = "current-directory-disk-usage-map", .activate = action_current_dir_disk_usage_map },
     { .name = "clean-empty-folders", .activate = action_clean_empty_folders },
     { .name = "current-directory-clean-empty-folders", .activate = action_current_dir_clean_empty_folders },
+    { .name = "flatten", .activate = action_flatten },
+    { .name = "current-directory-flatten", .activate = action_current_dir_flatten },
     { .name = "group-media", .activate = action_group_media },
     { .name = "current-directory-group-media", .activate = action_current_dir_group_media },
     { .name = "group-duplicates", .activate = action_group_duplicates },
@@ -8063,6 +8174,14 @@ nautilus_files_view_update_actions_state (NautilusFilesView *self)
                                  (selection_contains_recent || selection_contains_search ||
                                   selection_contains_starred));
 
+    action = g_action_map_lookup_action (G_ACTION_MAP (view_action_group),
+                                         "open-link-target-location");
+    g_simple_action_set_enabled (G_SIMPLE_ACTION (action),
+                                 list_len_is_one (selection) &&
+                                 nautilus_file_is_symbolic_link (selection->data) &&
+                                 !nautilus_file_is_broken_symbolic_link (selection->data) &&
+                                 nautilus_file_get_symbolic_link_target_path (selection->data) != NULL);
+
     item_opens_in_view = selection != NULL;
 
     for (l = selection; l != NULL; l = l->next)
@@ -8373,6 +8492,13 @@ nautilus_files_view_update_actions_state (NautilusFilesView *self)
                                  list_len_is_one (selection) &&
                                  file_can_use_folder_tools (selection->data));
     action = g_action_map_lookup_action (G_ACTION_MAP (view_action_group),
+                                         "flatten");
+    g_simple_action_set_enabled (G_SIMPLE_ACTION (action),
+                                 mode == NAUTILUS_MODE_BROWSE &&
+                                 self->folder_tool_cancellable == NULL &&
+                                 list_len_is_one (selection) &&
+                                 file_can_use_folder_tools (selection->data));
+    action = g_action_map_lookup_action (G_ACTION_MAP (view_action_group),
                                          "group-duplicates");
     g_simple_action_set_enabled (G_SIMPLE_ACTION (action),
                                  mode == NAUTILUS_MODE_BROWSE &&
@@ -8398,6 +8524,16 @@ nautilus_files_view_update_actions_state (NautilusFilesView *self)
                                  file_can_use_folder_tools (self->directory_as_file));
     action = g_action_map_lookup_action (G_ACTION_MAP (view_action_group),
                                          "current-directory-group-media");
+    g_simple_action_set_enabled (G_SIMPLE_ACTION (action),
+                                 mode == NAUTILUS_MODE_BROWSE &&
+                                 self->folder_tool_cancellable == NULL &&
+                                 !selection_contains_recent &&
+                                 !selection_contains_search &&
+                                 !selection_contains_starred &&
+                                 !is_network_view &&
+                                 file_can_use_folder_tools (self->directory_as_file));
+    action = g_action_map_lookup_action (G_ACTION_MAP (view_action_group),
+                                         "current-directory-flatten");
     g_simple_action_set_enabled (G_SIMPLE_ACTION (action),
                                  mode == NAUTILUS_MODE_BROWSE &&
                                  self->folder_tool_cancellable == NULL &&

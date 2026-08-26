@@ -157,6 +157,90 @@ test_clean_empty_is_recursive_and_safe (void)
 }
 
 static void
+test_flatten_moves_nested_files_safely (void)
+{
+    g_autofree char *root = g_dir_make_tmp ("nautilus-folder-tools-XXXXXX", NULL);
+    g_autofree char *nested = g_build_filename (root, "nested", NULL);
+    g_autofree char *deeper = g_build_filename (nested, "deeper", NULL);
+    g_autofree char *hidden = g_build_filename (root, ".cache", NULL);
+    g_autofree char *nested_repository = g_build_filename (root, "nested-repository", NULL);
+    g_autofree char *nested_repository_git = g_build_filename (nested_repository, ".git", NULL);
+    g_autofree char *root_existing = g_build_filename (root, "existing.txt", NULL);
+    g_autofree char *nested_existing = g_build_filename (nested, "existing.txt", NULL);
+    g_autofree char *moved_existing = g_build_filename (root, "existing_1.txt", NULL);
+    g_autofree char *root_readme = g_build_filename (root, "README", NULL);
+    g_autofree char *nested_readme = g_build_filename (deeper, "README", NULL);
+    g_autofree char *moved_readme = g_build_filename (root, "README_1", NULL);
+    g_autofree char *nested_photo = g_build_filename (deeper, "photo.jpg", NULL);
+    g_autofree char *moved_photo = g_build_filename (root, "photo.jpg", NULL);
+    g_autofree char *hidden_file = g_build_filename (hidden, "hidden.txt", NULL);
+    g_autofree char *moved_hidden_file = g_build_filename (root, "hidden.txt", NULL);
+    g_autofree char *repository_file = g_build_filename (nested_repository, "source.c", NULL);
+    g_autofree char *link_path = g_build_filename (nested, "linked-photo", NULL);
+    g_autoptr (GFile) location = g_file_new_for_path (root);
+    g_autoptr (NautilusFolderToolsResult) result = NULL;
+    g_autoptr (GError) error = NULL;
+
+    g_assert_nonnull (root);
+    g_assert_cmpint (g_mkdir (nested, 0700), ==, 0);
+    g_assert_cmpint (g_mkdir (deeper, 0700), ==, 0);
+    g_assert_cmpint (g_mkdir (hidden, 0700), ==, 0);
+    g_assert_cmpint (g_mkdir (nested_repository, 0700), ==, 0);
+    g_assert_cmpint (g_mkdir (nested_repository_git, 0700), ==, 0);
+    create_file (root_existing, "root");
+    create_file (nested_existing, "nested");
+    create_file (root_readme, "root readme");
+    create_file (nested_readme, "nested readme");
+    create_file (nested_photo, "photo");
+    create_file (hidden_file, "hidden");
+    create_file (repository_file, "repository");
+    g_assert_cmpint (symlink (nested_photo, link_path), ==, 0);
+
+    result = nautilus_folder_tools_flatten (location, NULL, &error);
+
+    g_assert_no_error (error);
+    g_assert_nonnull (result);
+    g_assert_cmpuint (nautilus_folder_tools_result_get_changed (result), ==, 4);
+    g_assert_cmpuint (nautilus_folder_tools_result_get_failed (result), ==, 0);
+    g_assert_true (g_file_test (root_existing, G_FILE_TEST_IS_REGULAR));
+    g_assert_true (g_file_test (moved_existing, G_FILE_TEST_IS_REGULAR));
+    g_assert_true (g_file_test (root_readme, G_FILE_TEST_IS_REGULAR));
+    g_assert_true (g_file_test (moved_readme, G_FILE_TEST_IS_REGULAR));
+    g_assert_true (g_file_test (moved_photo, G_FILE_TEST_IS_REGULAR));
+    g_assert_true (g_file_test (moved_hidden_file, G_FILE_TEST_IS_REGULAR));
+    g_assert_true (g_file_test (nested, G_FILE_TEST_IS_DIR));
+    g_assert_true (g_file_test (link_path, G_FILE_TEST_IS_SYMLINK));
+    g_assert_true (g_file_test (repository_file, G_FILE_TEST_IS_REGULAR));
+
+    remove_tree (root);
+}
+
+static void
+test_flatten_rejects_version_control_root (void)
+{
+    g_autofree char *root = g_dir_make_tmp ("nautilus-folder-tools-XXXXXX", NULL);
+    g_autofree char *git_directory = g_build_filename (root, ".git", NULL);
+    g_autofree char *nested = g_build_filename (root, "nested", NULL);
+    g_autofree char *nested_file = g_build_filename (nested, "keep.txt", NULL);
+    g_autoptr (GFile) location = g_file_new_for_path (root);
+    g_autoptr (NautilusFolderToolsResult) result = NULL;
+    g_autoptr (GError) error = NULL;
+
+    g_assert_nonnull (root);
+    g_assert_cmpint (g_mkdir (git_directory, 0700), ==, 0);
+    g_assert_cmpint (g_mkdir (nested, 0700), ==, 0);
+    create_file (nested_file, "keep");
+
+    result = nautilus_folder_tools_flatten (location, NULL, &error);
+
+    g_assert_null (result);
+    g_assert_error (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED);
+    g_assert_true (g_file_test (nested_file, G_FILE_TEST_IS_REGULAR));
+
+    remove_tree (root);
+}
+
+static void
 test_group_duplicates_only_compares_direct_files (void)
 {
     g_autofree char *root = g_dir_make_tmp ("nautilus-folder-tools-XXXXXX", NULL);
@@ -349,6 +433,8 @@ main (int   argc,
     g_test_add_func ("/folder-tools/categories/match-script", test_categories_match_script);
     g_test_add_func ("/folder-tools/group/direct-files", test_group_media_only_moves_direct_files);
     g_test_add_func ("/folder-tools/clean/recursive-safe", test_clean_empty_is_recursive_and_safe);
+    g_test_add_func ("/folder-tools/flatten/moves-nested-files-safely", test_flatten_moves_nested_files_safely);
+    g_test_add_func ("/folder-tools/flatten/rejects-version-control-root", test_flatten_rejects_version_control_root);
     g_test_add_func ("/folder-tools/duplicates/direct-files", test_group_duplicates_only_compares_direct_files);
     g_test_add_func ("/folder-tools/duplicates/deep", test_group_duplicates_deep_scans_subfolders);
     g_test_add_func ("/folder-tools/cancellation", test_operations_honor_cancellation);

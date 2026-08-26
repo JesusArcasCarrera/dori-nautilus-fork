@@ -17,6 +17,9 @@ const char *nautilus_folder_tools_get_category_for_name (const char *name);
 NautilusFolderToolsResult *nautilus_folder_tools_clean_empty (GFile         *location,
                                                               GCancellable *cancellable,
                                                               GError      **error);
+NautilusFolderToolsResult *nautilus_folder_tools_flatten (GFile         *location,
+                                                          GCancellable *cancellable,
+                                                          GError      **error);
 NautilusFolderToolsResult *nautilus_folder_tools_group_media (GFile         *location,
                                                               GCancellable *cancellable,
                                                               GError      **error);
@@ -29,6 +32,10 @@ void nautilus_folder_tools_clean_empty_async (GFile               *location,
                                               GCancellable         *cancellable,
                                               GAsyncReadyCallback   callback,
                                               gpointer              user_data);
+void nautilus_folder_tools_flatten_async (GFile               *location,
+                                          GCancellable         *cancellable,
+                                          GAsyncReadyCallback   callback,
+                                          gpointer              user_data);
 void nautilus_folder_tools_group_media_async (GFile               *location,
                                               GCancellable         *cancellable,
                                               GAsyncReadyCallback   callback,

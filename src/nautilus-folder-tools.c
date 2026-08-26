@@ -6,6 +6,7 @@
 
 #include "nautilus-folder-tools.h"
 
+#include <glib/gi18n.h>
 #include <string.h>
 
 struct _NautilusFolderToolsResult
@@ -30,6 +31,12 @@ typedef struct
     char *relative_path;
     guint depth;
 } DuplicateCandidate;
+
+typedef struct
+{
+    GFile *file;
+    char *relative_path;
+} FlattenCandidate;
 
 static void
 result_record_error (NautilusFolderToolsResult *result,
@@ -289,22 +296,357 @@ nautilus_folder_tools_clean_empty (GFile         *location,
 }
 
 static GFile *
-get_unique_destination (GFile       *category_directory,
+get_unique_destination (GFile       *directory,
                         const char  *name,
                         guint        suffix)
 {
     g_autofree char *candidate = NULL;
+    const char *dot;
 
     if (suffix == 0)
     {
-        return g_file_get_child (category_directory, name);
+        return g_file_get_child (directory, name);
     }
 
-    const char *dot = strrchr (name, '.');
-    g_autofree char *base = g_strndup (name, dot - name);
-    candidate = g_strdup_printf ("%s_%u%s", base, suffix, dot);
+    dot = strrchr (name, '.');
+    if (dot == NULL || dot == name)
+    {
+        candidate = g_strdup_printf ("%s_%u", name, suffix);
+    }
+    else
+    {
+        g_autofree char *base = g_strndup (name, dot - name);
 
-    return g_file_get_child (category_directory, candidate);
+        candidate = g_strdup_printf ("%s_%u%s", base, suffix, dot);
+    }
+
+    return g_file_get_child (directory, candidate);
+}
+
+static FlattenCandidate *
+flatten_candidate_new (GFile      *file,
+                       const char *relative_path)
+{
+    FlattenCandidate *candidate;
+
+    candidate = g_new0 (FlattenCandidate, 1);
+    candidate->file = g_object_ref (file);
+    candidate->relative_path = g_strdup (relative_path);
+
+    return candidate;
+}
+
+static void
+flatten_candidate_free (FlattenCandidate *candidate)
+{
+    g_clear_object (&candidate->file);
+    g_free (candidate->relative_path);
+    g_free (candidate);
+}
+
+static gint
+compare_flatten_candidates (gconstpointer a,
+                            gconstpointer b)
+{
+    const FlattenCandidate *candidate_a = *(FlattenCandidate * const *) a;
+    const FlattenCandidate *candidate_b = *(FlattenCandidate * const *) b;
+
+    return g_strcmp0 (candidate_a->relative_path, candidate_b->relative_path);
+}
+
+static gboolean
+is_version_control_metadata (const char *name)
+{
+    static const char *metadata_names[] =
+    {
+        ".git",
+        ".hg",
+        ".svn",
+        ".bzr",
+        ".jj",
+        "_darcs",
+    };
+
+    for (guint i = 0; i < G_N_ELEMENTS (metadata_names); i++)
+    {
+        if (g_str_equal (name, metadata_names[i]))
+        {
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
+static gboolean
+directory_has_version_control_metadata (GFile         *directory,
+                                        GCancellable *cancellable,
+                                        gboolean     *has_metadata,
+                                        GError      **error)
+{
+    static const char *metadata_names[] =
+    {
+        ".git",
+        ".hg",
+        ".svn",
+        ".bzr",
+        ".jj",
+        "_darcs",
+    };
+
+    *has_metadata = FALSE;
+
+    for (guint i = 0; i < G_N_ELEMENTS (metadata_names); i++)
+    {
+        g_autoptr (GFile) child = g_file_get_child (directory, metadata_names[i]);
+        g_autoptr (GFileInfo) info = NULL;
+        g_autoptr (GError) local_error = NULL;
+
+        info = g_file_query_info (child,
+                                  G_FILE_ATTRIBUTE_STANDARD_TYPE,
+                                  G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS,
+                                  cancellable,
+                                  &local_error);
+        if (info != NULL)
+        {
+            *has_metadata = TRUE;
+            return TRUE;
+        }
+
+        if (g_error_matches (local_error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND))
+        {
+            continue;
+        }
+
+        g_propagate_error (error, g_steal_pointer (&local_error));
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+static gboolean
+collect_flatten_candidates (GFile                      *root,
+                            GFile                      *directory,
+                            guint32                     root_device,
+                            GPtrArray                  *candidates,
+                            NautilusFolderToolsResult *result,
+                            GCancellable               *cancellable,
+                            GError                    **error)
+{
+    g_autoptr (GFileEnumerator) enumerator = NULL;
+    g_autoptr (GError) local_error = NULL;
+
+    enumerator = g_file_enumerate_children (directory,
+                                            G_FILE_ATTRIBUTE_STANDARD_NAME ","
+                                            G_FILE_ATTRIBUTE_STANDARD_TYPE ","
+                                            G_FILE_ATTRIBUTE_UNIX_DEVICE,
+                                            G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS,
+                                            cancellable,
+                                            &local_error);
+    if (enumerator == NULL)
+    {
+        if (g_error_matches (local_error, G_IO_ERROR, G_IO_ERROR_CANCELLED) ||
+            g_file_equal (root, directory))
+        {
+            g_propagate_error (error, g_steal_pointer (&local_error));
+            return FALSE;
+        }
+
+        result_record_error (result, local_error);
+        return TRUE;
+    }
+
+    while (TRUE)
+    {
+        g_autoptr (GFileInfo) info = NULL;
+        g_autoptr (GFile) child = NULL;
+        const char *name;
+        GFileType file_type;
+
+        g_clear_error (&local_error);
+        info = g_file_enumerator_next_file (enumerator, cancellable, &local_error);
+        if (info == NULL)
+        {
+            if (local_error != NULL)
+            {
+                if (g_error_matches (local_error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+                {
+                    g_propagate_error (error, g_steal_pointer (&local_error));
+                    return FALSE;
+                }
+
+                result_record_error (result, local_error);
+            }
+
+            break;
+        }
+
+        name = g_file_info_get_name (info);
+        if (is_version_control_metadata (name))
+        {
+            continue;
+        }
+
+        child = g_file_get_child (directory, name);
+        file_type = g_file_info_get_file_type (info);
+
+        if (file_type == G_FILE_TYPE_REGULAR && !g_file_equal (root, directory))
+        {
+            g_autofree char *relative_path = g_file_get_relative_path (root, child);
+
+            g_ptr_array_add (candidates,
+                             flatten_candidate_new (child, relative_path));
+        }
+        else if (file_type == G_FILE_TYPE_DIRECTORY &&
+                 g_file_info_get_attribute_uint32 (info, G_FILE_ATTRIBUTE_UNIX_DEVICE) == root_device)
+        {
+            gboolean has_metadata;
+
+            g_clear_error (&local_error);
+            if (!directory_has_version_control_metadata (child,
+                                                         cancellable,
+                                                         &has_metadata,
+                                                         &local_error))
+            {
+                if (g_error_matches (local_error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+                {
+                    g_propagate_error (error, g_steal_pointer (&local_error));
+                    return FALSE;
+                }
+
+                result_record_error (result, local_error);
+                continue;
+            }
+
+            if (!has_metadata &&
+                !collect_flatten_candidates (root,
+                                             child,
+                                             root_device,
+                                             candidates,
+                                             result,
+                                             cancellable,
+                                             error))
+            {
+                return FALSE;
+            }
+        }
+    }
+
+    g_clear_error (&local_error);
+    if (!g_file_enumerator_close (enumerator, cancellable, &local_error))
+    {
+        if (g_error_matches (local_error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+        {
+            g_propagate_error (error, g_steal_pointer (&local_error));
+            return FALSE;
+        }
+
+        result_record_error (result, local_error);
+    }
+
+    return TRUE;
+}
+
+NautilusFolderToolsResult *
+nautilus_folder_tools_flatten (GFile         *location,
+                               GCancellable *cancellable,
+                               GError      **error)
+{
+    g_autoptr (NautilusFolderToolsResult) result = NULL;
+    g_autoptr (GPtrArray) candidates = NULL;
+    g_autoptr (GFileInfo) root_info = NULL;
+    g_autoptr (GError) local_error = NULL;
+    gboolean has_metadata;
+    guint32 root_device;
+
+    g_return_val_if_fail (G_IS_FILE (location), NULL);
+    g_return_val_if_fail (error == NULL || *error == NULL, NULL);
+
+    if (!directory_has_version_control_metadata (location,
+                                                 cancellable,
+                                                 &has_metadata,
+                                                 error))
+    {
+        return NULL;
+    }
+    if (has_metadata)
+    {
+        g_set_error_literal (error,
+                             G_IO_ERROR,
+                             G_IO_ERROR_NOT_SUPPORTED,
+                             _("Folders containing version-control metadata cannot be flattened."));
+        return NULL;
+    }
+
+    root_info = g_file_query_info (location,
+                                   G_FILE_ATTRIBUTE_UNIX_DEVICE,
+                                   G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS,
+                                   cancellable,
+                                   error);
+    if (root_info == NULL)
+    {
+        return NULL;
+    }
+
+    root_device = g_file_info_get_attribute_uint32 (root_info,
+                                                    G_FILE_ATTRIBUTE_UNIX_DEVICE);
+    result = g_new0 (NautilusFolderToolsResult, 1);
+    candidates = g_ptr_array_new_with_free_func ((GDestroyNotify) flatten_candidate_free);
+
+    if (!collect_flatten_candidates (location,
+                                     location,
+                                     root_device,
+                                     candidates,
+                                     result,
+                                     cancellable,
+                                     error))
+    {
+        return NULL;
+    }
+
+    g_ptr_array_sort (candidates, compare_flatten_candidates);
+
+    for (guint i = 0; i < candidates->len; i++)
+    {
+        FlattenCandidate *candidate = g_ptr_array_index (candidates, i);
+        g_autofree char *name = g_file_get_basename (candidate->file);
+
+        for (guint suffix = 0; ; suffix++)
+        {
+            g_autoptr (GFile) destination = get_unique_destination (location,
+                                                                    name,
+                                                                    suffix);
+
+            g_clear_error (&local_error);
+            if (g_file_move (candidate->file,
+                             destination,
+                             G_FILE_COPY_NOFOLLOW_SYMLINKS,
+                             cancellable,
+                             NULL,
+                             NULL,
+                             &local_error))
+            {
+                result->changed++;
+                break;
+            }
+
+            if (g_error_matches (local_error, G_IO_ERROR, G_IO_ERROR_EXISTS))
+            {
+                continue;
+            }
+            if (g_error_matches (local_error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+            {
+                g_propagate_error (error, g_steal_pointer (&local_error));
+                return NULL;
+            }
+
+            result_record_error (result, local_error);
+            break;
+        }
+    }
+
+    return g_steal_pointer (&result);
 }
 
 NautilusFolderToolsResult *
@@ -774,6 +1116,15 @@ nautilus_folder_tools_clean_empty_async (GFile               *location,
                                          gpointer              user_data)
 {
     run_async (location, nautilus_folder_tools_clean_empty, cancellable, callback, user_data);
+}
+
+void
+nautilus_folder_tools_flatten_async (GFile               *location,
+                                     GCancellable         *cancellable,
+                                     GAsyncReadyCallback   callback,
+                                     gpointer              user_data)
+{
+    run_async (location, nautilus_folder_tools_flatten, cancellable, callback, user_data);
 }
 
 void
