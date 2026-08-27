@@ -1,0 +1,12 @@
+[Nemo Action]
+Name=Combine PDFs
+Name[es]=Combinar PDFs
+Comment=Combine the selected PDFs in their visible order
+Comment[es]=Combina los PDF seleccionados en su orden visible
+Icon-Name=x-office-document-symbolic
+Exec=@media_tools_path@ combine-pdf %F
+Group=PDF
+Position=10
+Selection=Multiple
+Mimetypes=application/pdf;
+Dependencies=python3;qpdf;

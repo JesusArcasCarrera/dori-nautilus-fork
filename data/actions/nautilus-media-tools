@@ -1,0 +1,189 @@
+#!/usr/bin/env python3
+"""Safe, non-interactive media operations launched by Nautilus actions."""
+
+from __future__ import annotations
+
+import argparse
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import tempfile
+from typing import Callable, Sequence
+
+
+IS_SPANISH = os.environ.get("LANG", "").lower().startswith("es")
+
+
+def tr(english: str, spanish: str) -> str:
+    return spanish if IS_SPANISH else english
+
+
+def notify(title: str, message: str, *, error: bool = False) -> None:
+    if os.environ.get("NAUTILUS_MEDIA_TOOLS_NO_NOTIFY") == "1":
+        return
+
+    executable = shutil.which("notify-send")
+    if executable is None:
+        return
+
+    icon = "dialog-error-symbolic" if error else "org.gnome.Nautilus"
+    subprocess.run(
+        [executable, "--app-name=Nautilus", f"--icon={icon}", title, message],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def require_files(raw_paths: Sequence[str], minimum: int = 1) -> list[Path]:
+    paths = [Path(raw_path) for raw_path in raw_paths]
+    if len(paths) < minimum:
+        raise ValueError(tr("Not enough files were selected", "No se han seleccionado suficientes archivos"))
+    if any(not path.is_file() for path in paths):
+        raise ValueError(tr("The selection contains an invalid file", "La selección contiene un archivo no válido"))
+    return paths
+
+
+def available_path(directory: Path, stem: str, suffix: str) -> Path:
+    candidate = directory / f"{stem}{suffix}"
+    number = 2
+    while candidate.exists():
+        candidate = directory / f"{stem} ({number}){suffix}"
+        number += 1
+    return candidate
+
+
+def temporary_output(target: Path) -> Path:
+    descriptor, raw_path = tempfile.mkstemp(
+        dir=target.parent,
+        prefix=f".{target.stem}-",
+        suffix=target.suffix,
+    )
+    os.close(descriptor)
+    os.unlink(raw_path)
+    return Path(raw_path)
+
+
+def run_to_new_file(command: list[str], target: Path) -> Path:
+    temporary = temporary_output(target)
+    try:
+        expanded = [str(temporary) if argument == "{output}" else argument for argument in command]
+        subprocess.run(
+            expanded,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+        )
+        if target.exists():
+            target = available_path(target.parent, target.stem, target.suffix)
+        os.replace(temporary, target)
+        return target
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def combine_pdf(paths: Sequence[str]) -> list[Path]:
+    inputs = require_files(paths, minimum=2)
+    target = available_path(inputs[0].parent, f"{inputs[0].stem}_combinado", ".pdf")
+    command = ["qpdf", "--empty", "--pages", *(str(path) for path in inputs), "--", "{output}"]
+    return [run_to_new_file(command, target)]
+
+
+def image_target(source: Path, label: str, suffix: str | None = None) -> Path:
+    output_suffix = suffix or source.suffix or ".png"
+    return available_path(source.parent, f"{source.stem}_{label}", output_suffix)
+
+
+def transform_images(paths: Sequence[str], operation: str) -> list[Path]:
+    inputs = require_files(paths)
+    outputs: list[Path] = []
+
+    for source in inputs:
+        if operation == "rotate-image-right":
+            target = image_target(source, "girada-derecha")
+            arguments = ["magick", str(source), "-auto-orient", "-rotate", "90", "{output}"]
+        elif operation == "rotate-image-left":
+            target = image_target(source, "girada-izquierda")
+            arguments = ["magick", str(source), "-auto-orient", "-rotate", "-90", "{output}"]
+        elif operation == "convert-image-png":
+            target = image_target(source, "convertida", ".png")
+            arguments = ["magick", str(source), "-auto-orient", "{output}"]
+        else:
+            target = image_target(source, "convertida", ".jpg")
+            arguments = [
+                "magick", str(source), "-auto-orient", "-background", "white",
+                "-alpha", "remove", "-alpha", "off", "-quality", "92", "{output}",
+            ]
+        outputs.append(run_to_new_file(arguments, target))
+
+    return outputs
+
+
+def videos_to_mkv(paths: Sequence[str]) -> list[Path]:
+    inputs = require_files(paths)
+    outputs: list[Path] = []
+
+    for source in inputs:
+        target = available_path(source.parent, f"{source.stem}_convertido", ".mkv")
+        command = [
+            "ffmpeg", "-nostdin", "-v", "error", "-i", str(source),
+            "-map", "0", "-map_metadata", "0", "-c", "copy", "{output}",
+        ]
+        outputs.append(run_to_new_file(command, target))
+
+    return outputs
+
+
+OPERATIONS: dict[str, Callable[[Sequence[str]], list[Path]]] = {
+    "combine-pdf": combine_pdf,
+    "rotate-image-right": lambda paths: transform_images(paths, "rotate-image-right"),
+    "rotate-image-left": lambda paths: transform_images(paths, "rotate-image-left"),
+    "convert-image-png": lambda paths: transform_images(paths, "convert-image-png"),
+    "convert-image-jpeg": lambda paths: transform_images(paths, "convert-image-jpeg"),
+    "video-to-mkv": videos_to_mkv,
+}
+
+
+def parse_arguments() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=tr(
+            "Create new media files without overwriting the originals.",
+            "Crea nuevos archivos multimedia sin sobrescribir los originales.",
+        )
+    )
+    parser.add_argument("operation", choices=OPERATIONS)
+    parser.add_argument("files", nargs="+", help=tr("input files", "archivos de entrada"))
+    return parser.parse_args()
+
+
+def main() -> int:
+    arguments = parse_arguments()
+    operation = OPERATIONS[arguments.operation]
+    notify(
+        tr("Media operation started", "Operación multimedia iniciada"),
+        tr("The new files will appear in the same folder.", "Los archivos nuevos aparecerán en la misma carpeta."),
+    )
+
+    try:
+        outputs = operation(arguments.files)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        notify(
+            tr("The operation could not be completed", "No se pudo completar la operación"),
+            tr("The original files have not been modified.", "Los archivos originales no se han modificado."),
+            error=True,
+        )
+        return 1
+
+    first_name = outputs[0].name
+    if len(outputs) == 1:
+        message = tr(f"Created {first_name}", f"Se ha creado {first_name}")
+    else:
+        message = tr(f"Created {len(outputs)} files", f"Se han creado {len(outputs)} archivos")
+    notify(tr("Operation completed", "Operación completada"), message)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -296,6 +296,7 @@ rebuild_custom_actions_rows (AdwPreferencesGroup *group,
     GList *actions;
     GList *current = NULL;
     const char *last_group = NULL;
+    gboolean has_user_actions = FALSE;
 
     /* Drop the rows we added last time. The group's title + description and
      * the header-suffix Add button are not in this list, so they stay. */
@@ -309,7 +310,17 @@ rebuild_custom_actions_rows (AdwPreferencesGroup *group,
 
     actions = nemo_action_manager_get_actions (manager);
 
-    if (actions == NULL)
+    for (GList *l = actions; l != NULL; l = l->next)
+    {
+        if (nemo_action_manager_is_user_action (manager,
+                                                nemo_action_get_id (l->data)))
+        {
+            has_user_actions = TRUE;
+            break;
+        }
+    }
+
+    if (!has_user_actions)
     {
         AdwActionRow *empty = ADW_ACTION_ROW (adw_action_row_new ());
 
@@ -332,6 +343,11 @@ rebuild_custom_actions_rows (AdwPreferencesGroup *group,
         const char *group_name = nemo_action_get_group (action);
         const char *id = nemo_action_get_id (action);
         AdwActionRow *row;
+
+        if (!nemo_action_manager_is_user_action (manager, id))
+        {
+            continue;
+        }
 
         if (group_name == NULL)
         {

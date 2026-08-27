@@ -1,0 +1,13 @@
+[Nemo Action]
+Name=Convert to PNG
+Name[es]=Convertir a PNG
+Comment=Create a PNG copy of each selected image
+Comment[es]=Crea una copia PNG de cada imagen seleccionada
+Icon-Name=image-x-generic-symbolic
+Exec=@media_tools_path@ convert-image-png %F
+Group=Image
+Group[es]=Imagen
+Position=30
+Selection=Any
+Mimetypes=image/*;
+Dependencies=python3;magick;

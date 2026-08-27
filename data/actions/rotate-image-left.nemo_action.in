@@ -1,0 +1,13 @@
+[Nemo Action]
+Name=Rotate left
+Name[es]=Girar a la izquierda
+Comment=Create a copy rotated 90 degrees counterclockwise
+Comment[es]=Crea una copia girada 90 grados en sentido antihorario
+Icon-Name=object-rotate-left-symbolic
+Exec=@media_tools_path@ rotate-image-left %F
+Group=Image
+Group[es]=Imagen
+Position=20
+Selection=Any
+Mimetypes=image/*;
+Dependencies=python3;magick;

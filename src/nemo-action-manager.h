@@ -1,7 +1,7 @@
 /* nemo-action-manager.h
  *
- * Loads and watches the user's custom context-menu actions from the
- * ~/.local/share/nemo/actions directory (".nemo_action" files).
+ * Loads bundled context-menu actions and watches the user's custom actions in
+ * ~/.local/share/nemo/actions (".nemo_action" files).
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -26,6 +26,11 @@ GList             *nemo_action_manager_get_actions   (NemoActionManager *self);
 
 NemoAction        *nemo_action_manager_get_action    (NemoActionManager *self,
                                                       const char        *id);
+
+/* Whether the effective action with this ID comes from the user's actions
+ * directory. Bundled actions overridden there count as user actions. */
+gboolean           nemo_action_manager_is_user_action (NemoActionManager *self,
+                                                       const char        *id);
 
 /* The folder where the manager looks for .nemo_action files. The returned
  * GFile is owned by the manager; don't free. */

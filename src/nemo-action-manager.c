@@ -1,6 +1,6 @@
 /* nemo-action-manager.c
  *
- * Loads and watches the user's custom context-menu actions.
+ * Loads bundled and user-defined context-menu actions, and watches the latter.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -64,19 +64,17 @@ compare_actions (gconstpointer a,
 }
 
 static void
-load_actions (NemoActionManager *self)
+load_actions_from_directory (NemoActionManager *self,
+                             GFile             *directory,
+                             GHashTable        *loaded_ids)
 {
     g_autoptr (GFileEnumerator) enumerator = NULL;
-
-    g_list_free_full (self->actions, g_object_unref);
-    self->actions = NULL;
-
-    enumerator = g_file_enumerate_children (self->actions_location,
+    enumerator = g_file_enumerate_children (directory,
                                             G_FILE_ATTRIBUTE_STANDARD_NAME,
                                             G_FILE_QUERY_INFO_NONE, NULL, NULL);
     if (enumerator == NULL)
     {
-        /* A missing directory simply means there are no actions yet. */
+        /* Missing XDG data directories simply contain no actions. */
         return;
     }
 
@@ -91,18 +89,52 @@ load_actions (NemoActionManager *self)
         }
 
         name = g_file_info_get_name (info);
-        if (name != NULL && g_str_has_suffix (name, ACTION_SUFFIX))
+        if (name != NULL &&
+            g_str_has_suffix (name, ACTION_SUFFIX) &&
+            !g_hash_table_contains (loaded_ids, name))
         {
-            g_autoptr (GFile) file = g_file_get_child (self->actions_location, name);
+            g_autoptr (GFile) file = g_file_get_child (directory, name);
             NemoAction *action = nemo_action_new (file);
 
             if (action != NULL)
             {
                 self->actions = g_list_prepend (self->actions, action);
+                g_hash_table_add (loaded_ids, g_strdup (name));
             }
         }
 
         g_object_unref (info);
+    }
+}
+
+static void
+load_actions (NemoActionManager *self)
+{
+    g_autoptr (GHashTable) loaded_ids = NULL;
+    const char * const *system_data_dirs;
+
+    g_list_free_full (self->actions, g_object_unref);
+    self->actions = NULL;
+
+    loaded_ids = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+
+    /* User actions have precedence over bundled actions with the same ID. */
+    load_actions_from_directory (self, self->actions_location, loaded_ids);
+
+    system_data_dirs = g_get_system_data_dirs ();
+    for (guint i = 0; system_data_dirs[i] != NULL; i++)
+    {
+        g_autofree char *actions_dir = NULL;
+        g_autoptr (GFile) actions_location = NULL;
+
+        actions_dir = g_build_filename (system_data_dirs[i],
+                                        "nautilus", "actions", NULL);
+        actions_location = g_file_new_for_path (actions_dir);
+
+        if (!g_file_equal (actions_location, self->actions_location))
+        {
+            load_actions_from_directory (self, actions_location, loaded_ids);
+        }
     }
 
     self->actions = g_list_sort (self->actions, compare_actions);
@@ -239,6 +271,20 @@ nemo_action_manager_get_action (NemoActionManager *self,
     }
 
     return NULL;
+}
+
+gboolean
+nemo_action_manager_is_user_action (NemoActionManager *self,
+                                    const char        *id)
+{
+    g_autoptr (GFile) file = NULL;
+
+    g_return_val_if_fail (NEMO_IS_ACTION_MANAGER (self), FALSE);
+    g_return_val_if_fail (id != NULL, FALSE);
+
+    file = g_file_get_child (self->actions_location, id);
+
+    return g_file_query_exists (file, NULL);
 }
 
 GFile *

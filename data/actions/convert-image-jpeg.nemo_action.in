@@ -1,0 +1,13 @@
+[Nemo Action]
+Name=Convert to JPEG
+Name[es]=Convertir a JPEG
+Comment=Create a JPEG copy of each selected image
+Comment[es]=Crea una copia JPEG de cada imagen seleccionada
+Icon-Name=image-x-generic-symbolic
+Exec=@media_tools_path@ convert-image-jpeg %F
+Group=Image
+Group[es]=Imagen
+Position=40
+Selection=Any
+Mimetypes=image/*;
+Dependencies=python3;magick;

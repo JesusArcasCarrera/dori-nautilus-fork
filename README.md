@@ -67,7 +67,10 @@ A native system for user-defined entries in the context menu. Drop files into
 `~/.local/share/nemo/actions/` and they appear in the right-click menu, live
 (a `GFileMonitor` reloads on edit). The format is **compatible with Cinnamon
 Nemo's `.nemo_action`** so existing actions from that ecosystem mostly drop
-in.
+in. The fork can also install bundled actions under
+`$XDG_DATA_DIRS/nautilus/actions/`; a personal action with the same filename
+always takes precedence and only personal actions appear in the preferences
+editor.
 
 Three action types are supported:
 
@@ -99,6 +102,24 @@ Group=Editors
 Position=10
 Icon-Name=visual-studio-code
 ```
+
+### Direct PDF, image and video operations
+
+The fork ships type-aware submenus for common operations that should not
+require opening a separate editor:
+
+  - **PDF → Combine PDFs** joins two or more selected PDFs with `qpdf`. GTK
+    does not retain the chronological order of selection clicks, so pages are
+    combined in the stable visible order of the current view.
+  - **Image** can rotate copies 90 degrees left/right or convert copies to PNG
+    and JPEG with ImageMagick.
+  - **Video → Convert to MKV without re-encoding** remuxes every selected video
+    with FFmpeg, preserving its streams and quality.
+
+Every operation writes to a temporary file in the destination folder and
+renames it only after success. Originals are never overwritten; existing
+output names receive a numeric suffix. An action is hidden automatically when
+its dependency (`qpdf`, `magick` or `ffmpeg`) is unavailable.
 
 ### Configurable type-to-action behaviour
 
