@@ -61,6 +61,9 @@
 #include "nautilus-tag-manager.h"
 #include "nautilus-trash-monitor.h"
 #include "nautilus-ui-utilities.h"
+#ifdef HAVE_ESTIBA
+#include <estiba.h>
+#endif
 
 #ifdef GDK_WINDOWING_X11
 #include <gdk/x11/gdkx.h>
@@ -7508,40 +7511,30 @@ extract_job_on_decide_destination (AutoarExtractor *extractor,
     return g_object_ref (decided_destination);
 }
 
+/* Progreso de un archivo concreto (fracción 0‑1) proyectado sobre el trabajo
+ * completo; lo usan tanto gnome-autoar como Estiba. */
 static void
-extract_job_on_progress (AutoarExtractor *extractor,
-                         guint64          archive_current_decompressed_size,
-                         guint            archive_current_decompressed_files,
-                         gpointer         user_data)
+extract_job_report_progress (ExtractJob *extract_job,
+                             GFile      *source_file,
+                             gdouble     archive_decompress_progress)
 {
-    ExtractJob *extract_job = user_data;
-    CommonJob *common = user_data;
-    GFile *source_file;
+    CommonJob *common = (CommonJob *) extract_job;
     char *details;
     double elapsed;
     double transfer_rate;
     int remaining_time;
-    guint64 archive_total_decompressed_size;
     gdouble archive_weight;
-    gdouble archive_decompress_progress;
     guint64 job_completed_size;
     gdouble job_progress;
     g_autofree gchar *basename = NULL;
     g_autofree gchar *formatted_size_job_completed_size = NULL;
     g_autofree gchar *formatted_size_total_compressed_size = NULL;
 
-    source_file = autoar_extractor_get_source_file (extractor);
-
     basename = get_basename (source_file);
     nautilus_progress_info_take_status (common->progress,
                                         g_strdup_printf (_("Extracting “%s”"),
                                                          basename),
                                         NULL);
-
-    archive_total_decompressed_size = autoar_extractor_get_total_size (extractor);
-
-    archive_decompress_progress = (gdouble) archive_current_decompressed_size /
-                                  (gdouble) archive_total_decompressed_size;
 
     archive_weight = 0;
     if (extract_job->total_compressed_size)
@@ -7618,20 +7611,43 @@ extract_job_on_progress (AutoarExtractor *extractor,
 }
 
 static void
-extract_job_on_error (AutoarExtractor *extractor,
-                      GError          *error,
-                      gpointer         user_data)
+extract_job_on_progress (AutoarExtractor *extractor,
+                         guint64          archive_current_decompressed_size,
+                         guint            archive_current_decompressed_files,
+                         gpointer         user_data)
 {
     ExtractJob *extract_job = user_data;
-    GFile *source_file;
+    GFile *source_file = autoar_extractor_get_source_file (extractor);
+    guint64 total = autoar_extractor_get_total_size (extractor);
+    gdouble fraction = total > 0 ? (gdouble) archive_current_decompressed_size / (gdouble) total : 0;
+
+    extract_job_report_progress (extract_job, source_file, fraction);
+}
+
+static gboolean
+extract_error_is_unsupported (GError *error)
+{
+#ifdef HAVE_ESTIBA
+    if (g_error_matches (error, ESTIBA_ERROR, ESTIBA_ERROR_UNSUPPORTED) ||
+        g_error_matches (error, ESTIBA_ERROR, ESTIBA_ERROR_BACKEND_MISSING))
+    {
+        return TRUE;
+    }
+#endif
+    return IS_IO_ERROR (error, NOT_SUPPORTED);
+}
+
+static void
+extract_job_report_error (ExtractJob *extract_job,
+                          GFile      *source_file,
+                          GError     *error)
+{
     GFile *destination;
     gint remaining_files;
     g_autofree gchar *basename = NULL;
     g_autofree gchar *heading = NULL;
 
-    source_file = autoar_extractor_get_source_file (extractor);
-
-    if (IS_IO_ERROR (error, NOT_SUPPORTED))
+    if (extract_error_is_unsupported (error))
     {
         handle_unsupported_compressed_file (extract_job->common.parent_window,
                                             source_file);
@@ -7678,6 +7694,14 @@ extract_job_on_error (AutoarExtractor *extractor,
                       NULL,
                       extract_job->total_files,
                       remaining_files > 1);
+}
+
+static void
+extract_job_on_error (AutoarExtractor *extractor,
+                      GError          *error,
+                      gpointer         user_data)
+{
+    extract_job_report_error (user_data, autoar_extractor_get_source_file (extractor), error);
 }
 
 static void
@@ -7811,6 +7835,249 @@ report_extract_final_progress (ExtractJob *extract_job)
     nautilus_progress_info_set_progress (extract_job->common.progress, 1, 1);
 }
 
+#ifdef HAVE_ESTIBA
+/* Extracción con Estiba (marea-archive): 7z multihilo, libarchive y unrar
+ * según el formato, con las mismas reglas que la ruta gnome-autoar: nunca
+ * sobrescribe, un solo elemento raíz sale suelto y varios van a una carpeta
+ * con el nombre del archivo. Se extrae a un directorio temporal dentro del
+ * destino y se mueve al final (mismo sistema de ficheros: es un rename). */
+
+typedef struct
+{
+    ExtractJob *extract_job;
+    GFile *source_file;
+} EstibaExtractContext;
+
+static void
+estiba_job_cancel_from_cancellable (GCancellable *cancellable,
+                                    gpointer      user_data)
+{
+    estiba_job_cancel (ESTIBA_JOB (user_data));
+}
+
+/* Ejecuta el trabajo en este hilo, atado al GCancellable de la operación. */
+static gboolean
+estiba_job_run_for (CommonJob  *common,
+                    EstibaJob  *job,
+                    GError    **error)
+{
+    gulong handler;
+    gboolean ok;
+
+    handler = g_cancellable_connect (common->cancellable,
+                                     G_CALLBACK (estiba_job_cancel_from_cancellable),
+                                     job, NULL);
+    ok = estiba_job_run_sync (job, error);
+    g_cancellable_disconnect (common->cancellable, handler);
+
+    return ok;
+}
+
+static void
+estiba_extract_on_password_needed (EstibaJob *job,
+                                   gpointer   user_data)
+{
+    EstibaExtractContext *ctx = user_data;
+    g_autofree gchar *basename = get_basename (ctx->source_file);
+    g_autofree gchar *passphrase = NULL;
+
+    passphrase = extract_ask_passphrase (ctx->extract_job->common.parent_window, basename);
+    if (passphrase == NULL)
+    {
+        abort_job ((CommonJob *) ctx->extract_job);
+        estiba_job_cancel (job);
+        return;
+    }
+
+    estiba_job_provide_password (job, passphrase);
+}
+
+static void
+estiba_extract_on_progress (EstibaJob *job,
+                            gpointer   user_data)
+{
+    EstibaExtractContext *ctx = user_data;
+    gdouble fraction = 0;
+
+    g_object_get (job, "fraction", &fraction, NULL);
+    extract_job_report_progress (ctx->extract_job, ctx->source_file, fraction);
+}
+
+/* Cuenta los elementos de primer nivel del listado; si es uno, lo devuelve. */
+static guint
+estiba_count_top_level (GListModel  *entries,
+                        gchar      **single_name)
+{
+    g_autoptr (GHashTable) seen = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+    guint n = g_list_model_get_n_items (entries);
+
+    for (guint i = 0; i < n; i++)
+    {
+        g_autoptr (GObject) entry = g_list_model_get_item (entries, i);
+        g_autofree gchar *path = NULL;
+        gchar *slash;
+
+        g_object_get (entry, "path", &path, NULL);
+        if (path == NULL || *path == '\0')
+        {
+            continue;
+        }
+        slash = strchr (path, '/');
+        if (slash != NULL)
+        {
+            *slash = '\0';
+        }
+        g_hash_table_add (seen, g_steal_pointer (&path));
+    }
+
+    if (g_hash_table_size (seen) == 1 && single_name != NULL)
+    {
+        GHashTableIter iter;
+        gpointer key;
+
+        g_hash_table_iter_init (&iter, seen);
+        g_hash_table_iter_next (&iter, &key, NULL);
+        *single_name = g_strdup (key);
+    }
+
+    return g_hash_table_size (seen);
+}
+
+/* «foto.tar.gz» → «foto»; «datos.7z» → «datos». */
+static gchar *
+estiba_archive_stem (GFile *source_file)
+{
+    gchar *stem = get_basename (source_file);
+    gchar *dot = strrchr (stem, '.');
+
+    if (dot != NULL && dot != stem)
+    {
+        *dot = '\0';
+        if (g_str_has_suffix (stem, ".tar"))
+        {
+            stem[strlen (stem) - 4] = '\0';
+        }
+    }
+
+    return stem;
+}
+
+static void
+extract_one_with_estiba (ExtractJob *extract_job,
+                         GFile      *source_file)
+{
+    g_autoptr (EstibaArchive) archive = estiba_archive_new (source_file);
+    g_autoptr (GListModel) entries = NULL;
+    g_autoptr (GFile) temp_dir = NULL;
+    g_autoptr (GFile) final_location = NULL;
+    g_autoptr (GError) error = NULL;
+    g_autofree gchar *dest_path = NULL;
+    g_autofree gchar *temp_path = NULL;
+    g_autofree gchar *single_name = NULL;
+    EstibaExtractContext ctx = { extract_job, source_file };
+    guint top_level;
+
+    nautilus_progress_info_set_details (extract_job->common.progress, _("Preparing to extract"));
+
+    {
+        g_autoptr (EstibaJob) list_job = estiba_archive_list (archive);
+
+        g_signal_connect (list_job, "password-needed",
+                          G_CALLBACK (estiba_extract_on_password_needed), &ctx);
+        if (!estiba_job_run_for ((CommonJob *) extract_job, list_job, &error))
+        {
+            if (!job_aborted ((CommonJob *) extract_job))
+            {
+                extract_job_report_error (extract_job, source_file, error);
+            }
+            return;
+        }
+    }
+
+    entries = estiba_archive_get_entries (archive);
+    top_level = estiba_count_top_level (entries, &single_name);
+    if (top_level == 0)
+    {
+        return;
+    }
+
+    dest_path = g_file_get_path (extract_job->destination_directory);
+    if (dest_path == NULL)
+    {
+        g_set_error_literal (&error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+                             _("Extraction is only possible into local folders."));
+        extract_job_report_error (extract_job, source_file, error);
+        return;
+    }
+
+    temp_path = g_build_filename (dest_path, ".estiba-extract-XXXXXX", NULL);
+    if (g_mkdtemp (temp_path) == NULL)
+    {
+        g_set_error (&error, G_IO_ERROR, g_io_error_from_errno (errno),
+                     "%s", g_strerror (errno));
+        extract_job_report_error (extract_job, source_file, error);
+        return;
+    }
+    temp_dir = g_file_new_for_path (temp_path);
+
+    {
+        g_autoptr (EstibaJob) job = estiba_archive_extract (archive, temp_dir, NULL,
+                                                            ESTIBA_CONFLICT_POLICY_RENAME_NEW);
+
+        g_signal_connect (job, "password-needed",
+                          G_CALLBACK (estiba_extract_on_password_needed), &ctx);
+        g_signal_connect (job, "progress",
+                          G_CALLBACK (estiba_extract_on_progress), &ctx);
+        if (!estiba_job_run_for ((CommonJob *) extract_job, job, &error))
+        {
+            delete_file_recursively (temp_dir, NULL, NULL, NULL);
+            if (!job_aborted ((CommonJob *) extract_job))
+            {
+                extract_job_report_error (extract_job, source_file, error);
+            }
+            return;
+        }
+    }
+
+    nautilus_progress_info_set_details (extract_job->common.progress, _("Verifying destination"));
+
+    if (top_level == 1)
+    {
+        g_autoptr (GFile) extracted = g_file_get_child (temp_dir, single_name);
+        gboolean is_dir = g_file_query_file_type (extracted, G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, NULL) == G_FILE_TYPE_DIRECTORY;
+
+        final_location = nautilus_generate_unique_file_in_directory (extract_job->destination_directory,
+                                                                     single_name, is_dir);
+        if (!g_file_move (extracted, final_location, G_FILE_COPY_NOFOLLOW_SYMLINKS,
+                          extract_job->common.cancellable, NULL, NULL, &error))
+        {
+            delete_file_recursively (temp_dir, NULL, NULL, NULL);
+            extract_job_report_error (extract_job, source_file, error);
+            return;
+        }
+        g_file_delete (temp_dir, NULL, NULL);
+    }
+    else
+    {
+        g_autofree gchar *stem = estiba_archive_stem (source_file);
+
+        final_location = nautilus_generate_unique_file_in_directory (extract_job->destination_directory,
+                                                                     stem, TRUE);
+        if (!g_file_move (temp_dir, final_location, G_FILE_COPY_NOFOLLOW_SYMLINKS,
+                          extract_job->common.cancellable, NULL, NULL, &error))
+        {
+            delete_file_recursively (temp_dir, NULL, NULL, NULL);
+            extract_job_report_error (extract_job, source_file, error);
+            return;
+        }
+    }
+
+    extract_job->output_files = g_list_prepend (extract_job->output_files,
+                                                g_steal_pointer (&final_location));
+    nautilus_file_changes_queue_file_added (extract_job->output_files->data);
+}
+#endif /* HAVE_ESTIBA */
+
 static void
 extract_task_thread_func (GTask        *task,
                           gpointer      source_object,
@@ -7863,6 +8130,28 @@ extract_task_thread_func (GTask        *task,
          l = l->next, i++)
     {
         g_autoptr (AutoarExtractor) extractor = NULL;
+
+#ifdef HAVE_ESTIBA
+        extract_job->archive_compressed_size = archive_compressed_sizes[i];
+        extract_job->destination_decided = FALSE;
+        extract_job->extraction_failed = FALSE;
+
+        extract_one_with_estiba (extract_job, G_FILE (l->data));
+
+        if (!extract_job->extraction_failed)
+        {
+            extract_job->base_progress += (gdouble) extract_job->archive_compressed_size /
+                                          (gdouble) extract_job->total_compressed_size;
+        }
+        else
+        {
+            extract_job->total_files--;
+            extract_job->base_progress *= extract_job->total_compressed_size;
+            extract_job->total_compressed_size -= extract_job->archive_compressed_size;
+            extract_job->base_progress /= extract_job->total_compressed_size;
+        }
+        continue;
+#endif
 
         extractor = autoar_extractor_new (G_FILE (l->data),
                                           extract_job->destination_directory);
@@ -8257,6 +8546,89 @@ compress_job_on_completed (AutoarCompressor *compressor,
                                             destination_directory);
 }
 
+#ifdef HAVE_ESTIBA
+/* Formato de Estiba equivalente a la pareja de gnome-autoar, o NULL si no
+ * hay equivalente (entonces se usa gnome-autoar). */
+static const gchar *
+estiba_format_for (AutoarFormat format,
+                   AutoarFilter filter)
+{
+    if (format == AUTOAR_FORMAT_ZIP && filter == AUTOAR_FILTER_NONE)
+    {
+        return "zip";
+    }
+    if (format == AUTOAR_FORMAT_7ZIP && filter == AUTOAR_FILTER_NONE)
+    {
+        return "7z";
+    }
+    if (format == AUTOAR_FORMAT_TAR)
+    {
+        switch (filter)
+        {
+            case AUTOAR_FILTER_NONE: return "tar";
+            case AUTOAR_FILTER_GZIP: return "tar.gz";
+            case AUTOAR_FILTER_BZIP2: return "tar.bz2";
+            case AUTOAR_FILTER_XZ: return "tar.xz";
+            default: return NULL;
+        }
+    }
+    return NULL;
+}
+
+static void
+estiba_compress_on_progress (EstibaJob *job,
+                             gpointer   user_data)
+{
+    CompressJob *compress_job = user_data;
+    gdouble fraction = 0;
+
+    g_object_get (job, "fraction", &fraction, NULL);
+    compress_job_on_progress (NULL,
+                              (guint64) (fraction * compress_job->total_size),
+                              (guint) (fraction * compress_job->total_files),
+                              compress_job);
+}
+
+static void
+compress_with_estiba (CompressJob *compress_job,
+                      const gchar *format)
+{
+    g_autoptr (EstibaOptions) options = estiba_options_new ();
+    g_autoptr (EstibaJob) job = NULL;
+    g_autoptr (GError) error = NULL;
+    g_autoptr (GPtrArray) sources = g_ptr_array_new ();
+
+    for (GList *l = compress_job->source_files; l != NULL; l = l->next)
+    {
+        g_ptr_array_add (sources, l->data);
+    }
+
+    g_object_set (options,
+                  "format", format,
+                  "level", 5,
+                  "zip-aes", TRUE,
+                  NULL);
+    if (compress_job->passphrase != NULL && compress_job->passphrase[0] != '\0')
+    {
+        g_object_set (options, "password", compress_job->passphrase, NULL);
+    }
+
+    job = estiba_create ((GFile **) sources->pdata, sources->len,
+                         compress_job->output_file, options);
+    g_signal_connect (job, "progress", G_CALLBACK (estiba_compress_on_progress), compress_job);
+
+    if (estiba_job_run_for ((CommonJob *) compress_job, job, &error))
+    {
+        compress_job_on_completed (NULL, compress_job);
+    }
+    else if (!job_aborted ((CommonJob *) compress_job) &&
+             !g_error_matches (error, ESTIBA_ERROR, ESTIBA_ERROR_CANCELLED))
+    {
+        compress_job_on_error (NULL, error, compress_job);
+    }
+}
+#endif /* HAVE_ESTIBA */
+
 static void
 compress_task_thread_func (GTask        *task,
                            gpointer      source_object,
@@ -8299,6 +8671,18 @@ compress_task_thread_func (GTask        *task,
         return;
     }
 
+#ifdef HAVE_ESTIBA
+    {
+        const gchar *estiba_format = estiba_format_for (compress_job->format, compress_job->filter);
+
+        if (estiba_format != NULL)
+        {
+            compress_with_estiba (compress_job, estiba_format);
+            goto done;
+        }
+    }
+#endif
+
     compressor = autoar_compressor_new (compress_job->source_files,
                                         compress_job->output_file,
                                         compress_job->format,
@@ -8322,6 +8706,10 @@ compress_task_thread_func (GTask        *task,
                       G_CALLBACK (compress_job_on_completed), compress_job);
     autoar_compressor_start (compressor,
                              compress_job->common.cancellable);
+
+#ifdef HAVE_ESTIBA
+done:
+#endif
 
     compress_job->output_archive_exists = g_file_query_exists (compress_job->output_file, NULL);
 

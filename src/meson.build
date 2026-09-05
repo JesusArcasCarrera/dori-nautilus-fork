@@ -287,6 +287,7 @@ nautilus_deps = [
   config_h,
   gio_unix,
   glycin,
+  estiba,
   glycin_gtk4,
   gmodule,
   gnome_autoar,

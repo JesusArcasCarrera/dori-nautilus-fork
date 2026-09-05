@@ -45,6 +45,12 @@ option(
   deprecated: {'true': 'enabled', 'false': 'disabled'},
   description: 'Enable the cloudproviders support',
 )
+option(
+  'estiba',
+  type: 'feature',
+  value: 'auto',
+  description: 'Compress and extract with Estiba (marea-archive: 7z, libarchive, unrar) instead of gnome-autoar alone',
+)
 ################
 # End features #
 ################
