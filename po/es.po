@@ -7168,10 +7168,6 @@ msgstr "Submenú / Grupo (opcional)"
 #~ msgid "No matches found in indexed locations"
 #~ msgstr "No se encontraron coincidencias en ubicaciones indexadas"
 
-#, fuzzy
-#~ msgid "Completed"
-#~ msgstr "Terminado"
-
 #, fuzzy, c-format
 #~ msgid "%d Hz"
 #~ msgstr "%d Hz"
@@ -8500,11 +8496,6 @@ msgstr "Submenú / Grupo (opcional)"
 #, fuzzy
 #~ msgid "List view"
 #~ msgstr "Vista de lista"
-
-# src/nautilus-location-bar.c:401
-#, fuzzy
-#~ msgid "Other locations"
-#~ msgstr "Otras ubicaciones"
 
 #, fuzzy
 #~ msgid "@icon@"
@@ -13767,6 +13758,50 @@ msgstr "_Otras ubicaciones"
 msgid "Show local drives and remote shares"
 msgstr "Mostrar unidades locales y recursos compartidos remotos"
 
+#: src/nautilus-other-locations-view.c:583
+msgid "No media"
+msgstr "No hay medios"
+
+#: src/nautilus-files-view.c:3852
+msgid "No Locations"
+msgstr "No hay ubicaciones"
+
+#: src/nautilus-files-view.c:3853
+msgid "Connect a drive or enter an address to mount a network location."
+msgstr "Conecte una unidad o introduzca una dirección para montar una ubicación de red."
+
+#: src/resources/ui/nautilus-preferences-dialog.blp:175
+msgid "Show _Network"
+msgstr "Mostrar la _red"
+
+#: src/resources/ui/nautilus-preferences-dialog.blp:176
+msgid "Include the Network section in Other Locations, so you can hide the sidebar Network entry and still reach networks here."
+msgstr "Incluir la sección Red en Otras ubicaciones para poder ocultar la entrada Red de la barra lateral y seguir accediendo a las redes desde aquí."
+
+#: src/resources/ui/nautilus-preferences-dialog.blp:35
+msgid "_Independent Hidden Files in Home"
+msgstr "Gestión _independiente de archivos ocultos en Inicio"
+
+#: src/resources/ui/nautilus-preferences-dialog.blp:36
+msgid "The Home folder keeps its own show/hide hidden files state, separate from every other folder. Hidden in Home by default."
+msgstr "La carpeta Inicio conserva su propio estado para mostrar u ocultar archivos ocultos, separado del resto de carpetas. En Inicio se ocultan de forma predeterminada."
+
+#: data/org.gnome.nautilus.gschema.xml
+msgid "Whether to show the Other Locations entry in the sidebar"
+msgstr "Indica si se muestra la entrada Otras ubicaciones en la barra lateral"
+
+#: data/org.gnome.nautilus.gschema.xml
+msgid "If set to true, the sidebar will list an \"Other Locations\" shortcut that opens the combined local drives and remote shares view."
+msgstr "Si se activa, la barra lateral mostrará un acceso directo a «Otras ubicaciones» que abre la vista combinada de unidades locales y recursos compartidos remotos."
+
+#: data/org.gnome.nautilus.gschema.xml
+msgid "Whether the Other Locations view shows the Network section"
+msgstr "Indica si la vista Otras ubicaciones muestra la sección Red"
+
+#: data/org.gnome.nautilus.gschema.xml
+msgid "If set to true, the Other Locations view includes a \"Networks\" section with remote shares. Lets you hide the sidebar Network entry while still reaching networks from Other Locations."
+msgstr "Si se activa, la vista Otras ubicaciones incluye una sección «Redes» con recursos compartidos remotos. Permite ocultar la entrada Red de la barra lateral y seguir accediendo a las redes desde Otras ubicaciones."
+
 #: src/nautilus-disk-usage-model.c
 msgid "The selected item is not a folder"
 msgstr "El elemento seleccionado no es una carpeta"
@@ -14035,8 +14070,21 @@ msgstr "Los archivos normales dentro de las subcarpetas de «%s» se moverán a 
 msgid "_Flatten Contents…"
 msgstr "_Aplanar contenido…"
 
-msgid "Pasted text"
-msgstr "Texto pegado"
+#: src/resources/ui/nautilus-properties-widget.blp
+msgid "Click to calculate"
+msgstr "Pulsa para calcular"
+
+#: src/nautilus-properties.c
+msgid "Calculating…"
+msgstr "Calculando…"
+
+#: src/nautilus-properties.c
+msgid "Could not calculate the checksum"
+msgstr "No se pudo calcular la suma de verificación"
+
+#: src/nautilus-properties.c
+msgid "SHA-256 copied to clipboard"
+msgstr "SHA-256 copiado al portapapeles"
 
 msgid "Custom actions block"
 msgstr "Bloque de acciones personalizadas"
@@ -14046,6 +14094,9 @@ msgstr "Junto a «Abrir en terminal» y otras formas de abrir"
 
 msgid "Menu block"
 msgstr "Bloque del menú"
+
+msgid "Pasted text"
+msgstr "Texto pegado"
 
 msgid "Overwrite “%s”?"
 msgstr "¿Sobrescribir «%s»?"
@@ -14059,6 +14110,51 @@ msgstr ""
 
 msgid "_Overwrite"
 msgstr "_Sobrescribir"
+
+#: src/resources/ui/nautilus-properties-widget.blp
+msgid "Multimedia"
+msgstr "Multimedia"
+
+#: src/nautilus-properties.c src/resources/ui/nautilus-properties-widget.blp
+msgid "Tracks"
+msgstr "Pistas"
+
+#: src/resources/ui/nautilus-properties-widget.blp
+msgid "Reading track information…"
+msgstr "Leyendo información de las pistas…"
+
+#: src/nautilus-properties.c
+msgid "Could not read track information"
+msgstr "No se pudo leer la información de las pistas"
+
+#: src/nautilus-properties.c
+#, c-format
+msgid "%u Audio Track"
+msgid_plural "%u Audio Tracks"
+msgstr[0] "%u pista de audio"
+msgstr[1] "%u pistas de audio"
+
+#: src/nautilus-properties.c
+#, c-format
+msgid "%u Subtitle Track"
+msgid_plural "%u Subtitle Tracks"
+msgstr[0] "%u pista de subtítulos"
+msgstr[1] "%u pistas de subtítulos"
+
+#: src/nautilus-properties.c
+#, c-format
+msgid "%u channel"
+msgid_plural "%u channels"
+msgstr[0] "%u canal"
+msgstr[1] "%u canales"
+
+#: src/nautilus-properties.c
+msgid "default"
+msgstr "predeterminada"
+
+#: src/nautilus-properties.c
+msgid "forced"
+msgstr "forzada"
 
 #: src/dori-action.c
 #, c-format
@@ -14166,64 +14262,3 @@ msgstr "Valores predeterminados por usuario para acciones parametrizadas del men
 #: data/org.gnome.nautilus.gschema.xml
 msgid "Maps stable action identifiers to the value used by the primary zone of split context-menu actions. Values from installed action files remain the factory defaults."
 msgstr "Asocia identificadores estables de acciones con el valor usado por la zona principal de las acciones partidas. Los valores de los archivos de acción instalados siguen siendo los predeterminados de fábrica."
-
-#: src/resources/ui/nautilus-properties-widget.blp
-msgid "Click to calculate"
-msgstr "Pulsa para calcular"
-
-#: src/nautilus-properties.c
-msgid "Calculating…"
-msgstr "Calculando…"
-
-#: src/nautilus-properties.c
-msgid "Could not calculate the checksum"
-msgstr "No se pudo calcular la suma de verificación"
-
-#: src/nautilus-properties.c
-msgid "SHA-256 copied to clipboard"
-msgstr "SHA-256 copiado al portapapeles"
-
-#: src/resources/ui/nautilus-properties-widget.blp
-msgid "Multimedia"
-msgstr "Multimedia"
-
-#: src/nautilus-properties.c src/resources/ui/nautilus-properties-widget.blp
-msgid "Tracks"
-msgstr "Pistas"
-
-#: src/resources/ui/nautilus-properties-widget.blp
-msgid "Reading track information…"
-msgstr "Leyendo información de las pistas…"
-
-#: src/nautilus-properties.c
-msgid "Could not read track information"
-msgstr "No se pudo leer la información de las pistas"
-
-#: src/nautilus-properties.c
-#, c-format
-msgid "%u Audio Track"
-msgid_plural "%u Audio Tracks"
-msgstr[0] "%u pista de audio"
-msgstr[1] "%u pistas de audio"
-
-#: src/nautilus-properties.c
-#, c-format
-msgid "%u Subtitle Track"
-msgid_plural "%u Subtitle Tracks"
-msgstr[0] "%u pista de subtítulos"
-msgstr[1] "%u pistas de subtítulos"
-
-#: src/nautilus-properties.c
-#, c-format
-msgid "%u channel"
-msgid_plural "%u channels"
-msgstr[0] "%u canal"
-msgstr[1] "%u canales"
-
-#: src/nautilus-properties.c
-msgid "default"
-msgstr "predeterminada"
-
-#: src/nautilus-properties.c
-msgid "forced"
-msgstr "forzada"
