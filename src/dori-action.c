@@ -1310,30 +1310,23 @@ prompt_data_free (PromptData *data)
 }
 
 static void
-on_prompt_response (AdwAlertDialog *dialog,
-                    const char     *response,
-                    gpointer        user_data)
+on_prompt_response (GtkButton *button,
+                    AdwDialog *dialog)
 {
-    PromptData *data = user_data;
+    PromptData *data = g_object_get_data (G_OBJECT (dialog), "prompt-data");
+    const char *value = gtk_editable_get_text (GTK_EDITABLE (data->entry));
 
-    if (g_strcmp0 (response, "run") == 0 ||
-        g_strcmp0 (response, "save-run") == 0)
+    if (g_object_get_data (G_OBJECT (button), "save-default") != NULL)
     {
-        const char *value = gtk_editable_get_text (GTK_EDITABLE (data->entry));
-
-        if (g_strcmp0 (response, "save-run") == 0)
-        {
-            save_prompt_default_override (data->action, value);
-        }
-        run_command (data->action, data->selection, data->parent_location, value);
+        save_prompt_default_override (data->action, value);
     }
-
-    prompt_data_free (data);
+    run_command (data->action, data->selection, data->parent_location, value);
+    adw_dialog_close (dialog);
 }
 
 /* Ask the user for the Prompt value in a small dialog, then run the command.
  * The selection list is owned by the caller, so it is copied for the async
- * round-trip. */
+ * round-trip. Closing the dialog only releases that snapshot. */
 static void
 run_command_with_prompt (DoriAction *self,
                          GList      *selection,
@@ -1341,12 +1334,20 @@ run_command_with_prompt (DoriAction *self,
                          GtkWidget  *widget)
 {
     g_autofree char *body = NULL;
-    AdwDialog *dialog;
+    AdwDialog *dialog = adw_dialog_new ();
+    GtkWidget *toolbar = adw_toolbar_view_new ();
+    GtkWidget *header = adw_header_bar_new ();
+    GtkWidget *content = gtk_box_new (GTK_ORIENTATION_VERTICAL, 18);
     GtkWidget *entry = gtk_entry_new ();
+    GtkWidget *buttons = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 12);
+    GtkWidget *run = gtk_button_new_with_mnemonic (_("_Run"));
+    GtkWidget *secondary;
+    GtkWidget *description;
     PromptData *data = g_new0 (PromptData, 1);
     g_autofree char *effective_default = NULL;
+    gboolean split = dori_action_has_split_prompt (self);
 
-    if (dori_action_has_split_prompt (self))
+    if (split)
     {
         body = g_strdup_printf ("%s\n%s", self->prompt,
                                 _("Run uses the value once; Save makes it the new default and runs."));
@@ -1355,12 +1356,30 @@ run_command_with_prompt (DoriAction *self,
     {
         body = g_strdup (self->prompt);
     }
-    dialog = adw_alert_dialog_new (self->name, body);
 
     data->action = g_object_ref (self);
     data->selection = nautilus_file_list_copy (selection);
     data->parent_location = (parent_location != NULL) ? g_object_ref (parent_location) : NULL;
     data->entry = entry;
+    g_object_set_data_full (G_OBJECT (dialog), "prompt-data", data,
+                            (GDestroyNotify) prompt_data_free);
+
+    adw_dialog_set_title (dialog, self->name);
+    adw_dialog_set_content_width (dialog, 380);
+    adw_header_bar_set_decoration_layout (ADW_HEADER_BAR (header), ":close");
+    adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (toolbar), header);
+    adw_toolbar_view_set_content (ADW_TOOLBAR_VIEW (toolbar), content);
+    adw_dialog_set_child (dialog, toolbar);
+
+    gtk_widget_set_margin_start (content, 24);
+    gtk_widget_set_margin_end (content, 24);
+    gtk_widget_set_margin_top (content, 12);
+    gtk_widget_set_margin_bottom (content, 24);
+    description = gtk_label_new (body);
+    gtk_label_set_wrap (GTK_LABEL (description), TRUE);
+    gtk_label_set_max_width_chars (GTK_LABEL (description), 40);
+    gtk_label_set_justify (GTK_LABEL (description), GTK_JUSTIFY_CENTER);
+    gtk_box_append (GTK_BOX (content), description);
 
     effective_default = dori_action_dup_effective_prompt_default (self);
     if (effective_default != NULL)
@@ -1371,32 +1390,30 @@ run_command_with_prompt (DoriAction *self,
     gtk_accessible_update_property (GTK_ACCESSIBLE (entry),
                                     GTK_ACCESSIBLE_PROPERTY_LABEL, self->prompt,
                                     -1);
+    gtk_box_append (GTK_BOX (content), entry);
 
-    adw_alert_dialog_set_extra_child (ADW_ALERT_DIALOG (dialog), entry);
-    if (dori_action_has_split_prompt (self))
+    gtk_box_set_homogeneous (GTK_BOX (buttons), TRUE);
+    gtk_widget_add_css_class (run, "suggested-action");
+    gtk_widget_set_size_request (run, -1, 44);
+    g_signal_connect (run, "clicked", G_CALLBACK (on_prompt_response), dialog);
+    secondary = gtk_button_new_with_mnemonic (split ? _("_Save") : _("_Cancel"));
+    if (split)
     {
-        adw_alert_dialog_add_responses (ADW_ALERT_DIALOG (dialog),
-                                        "run", _("_Run"),
-                                        "save-run", _("_Save"),
-                                        NULL);
-        adw_alert_dialog_set_prefer_wide_layout (ADW_ALERT_DIALOG (dialog), TRUE);
+        g_object_set_data (G_OBJECT (secondary), "save-default", GINT_TO_POINTER (TRUE));
+        g_signal_connect (secondary, "clicked", G_CALLBACK (on_prompt_response), dialog);
+        gtk_box_append (GTK_BOX (buttons), run);
+        gtk_box_append (GTK_BOX (buttons), secondary);
     }
     else
     {
-        adw_alert_dialog_add_responses (ADW_ALERT_DIALOG (dialog),
-                                        "cancel", _("_Cancel"),
-                                        "run", _("_Run"),
-                                        NULL);
+        g_signal_connect_swapped (secondary, "clicked", G_CALLBACK (adw_dialog_close), dialog);
+        gtk_box_append (GTK_BOX (buttons), secondary);
+        gtk_box_append (GTK_BOX (buttons), run);
     }
-    adw_alert_dialog_set_response_appearance (ADW_ALERT_DIALOG (dialog), "run",
-                                              ADW_RESPONSE_SUGGESTED);
-    adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "run");
-    adw_alert_dialog_set_close_response (ADW_ALERT_DIALOG (dialog), "cancel");
-
-    g_signal_connect (dialog, "response", G_CALLBACK (on_prompt_response), data);
-
+    gtk_box_append (GTK_BOX (content), buttons);
+    adw_dialog_set_default_widget (dialog, run);
+    adw_dialog_set_focus (dialog, entry);
     adw_dialog_present (dialog, widget);
-    gtk_widget_grab_focus (entry);
 }
 
 typedef struct

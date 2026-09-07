@@ -107,8 +107,10 @@ available as `%p` in `Exec` (shell-quoted) and as `$DORI_PROMPT`.
 Parameterized actions can opt into a split menu row with
 `Prompt-Mode=split`. Its main zone runs immediately with the effective default;
 the smaller arrow opens the input dialog, where the value can be used once or
-saved as the new per-user default. `Prompt-Display-Format` accepts one `%s` and
-controls how that value is shown beside the action name (for example `%s fps`).
+saved as the new per-user default. Menu labels show only the action name; the
+current default is shown in the input dialog. Its header close button and Escape
+dismiss it without saving or running. `Prompt-Display-Format` remains accepted
+for compatibility, but does not append parameters to menu labels.
 Missing or invalid split parameters fall back to the legacy ask-every-time
 behavior. User overrides live in GSettings and never rewrite installed action
 files.

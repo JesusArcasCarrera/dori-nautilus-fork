@@ -41,11 +41,11 @@
 }
 
 .dori-split-action > button:first-child:dir(ltr) {
-  padding-left: 0;
+  padding-left: 12px;
 }
 
 .dori-split-action > button:first-child:dir(rtl) {
-  padding-right: 0;
+  padding-right: 12px;
 }
 
 /* Path bar */

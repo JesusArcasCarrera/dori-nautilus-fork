@@ -14120,8 +14120,8 @@ msgid "Configure %s"
 msgstr "Configurar %s"
 
 #: src/nautilus-files-view.c
-msgid "Run immediately with the displayed default value"
-msgstr "Ejecutar inmediatamente con el valor predeterminado mostrado"
+msgid "Run immediately with the default value"
+msgstr "Ejecutar inmediatamente con el valor predeterminado"
 
 #: src/nautilus-files-view.c
 msgid "Choose a value for this run or save a new default"

@@ -9599,7 +9599,7 @@ static GtkWidget *
 create_split_action_row (GtkPopoverMenu *popover,
                          DoriAction     *action)
 {
-    g_autofree char *display_name = dori_action_dup_display_name (action);
+    const char *display_name = dori_action_get_name (action);
     g_autofree char *configure_label = g_strdup_printf (_("Configure %s"),
                                                         dori_action_get_name (action));
     GtkWidget *box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
@@ -9626,7 +9626,7 @@ create_split_action_row (GtkPopoverMenu *popover,
     gtk_accessible_update_property (GTK_ACCESSIBLE (primary),
                                     GTK_ACCESSIBLE_PROPERTY_LABEL, display_name,
                                     GTK_ACCESSIBLE_PROPERTY_HELP_TEXT,
-                                    _("Run immediately with the displayed default value"),
+                                    _("Run immediately with the default value"),
                                     -1);
     gtk_actionable_set_action_name (GTK_ACTIONABLE (primary),
                                     "view.run-custom-action-default");
