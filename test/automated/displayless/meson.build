@@ -2,6 +2,13 @@ tracker_sandbox = find_program('localsearch')
 python = import('python').find_installation()
 
 test(
+  'test-ui-template-bindings',
+  python,
+  args: [files('test-ui-template-bindings.py'), nautilus, join_paths(meson.project_source_root(), 'src')],
+  suite: ['displayless'],
+)
+
+test(
   'test-media-tools',
   python,
   args: [
