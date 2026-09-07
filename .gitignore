@@ -21,3 +21,11 @@ build/
 
 # Meson build dir
 /_build
+
+# Local scratch and backups (see user rules)
+_tmp/
+_backup_*/
+
+# Generated Python caches
+__pycache__/
+*.py[cod]
