@@ -33,8 +33,8 @@
 #include "nautilus-column-utilities.h"
 #include "nautilus-date-utilities.h"
 #include "nautilus-global-preferences.h"
-#include "nemo-action-editor.h"
-#include "nemo-action-manager.h"
+#include "dori-action-editor.h"
+#include "dori-action-manager.h"
 
 /* bool preferences */
 #define NAUTILUS_PREFERENCES_DIALOG_FOLDERS_FIRST_WIDGET                       \
@@ -173,28 +173,28 @@ setup_combo (GtkBuilder  *builder,
 /* The list of rows currently shown in the Custom Actions group; tracked so
  * we can drop them before repopulating when the action manager fires
  * "changed". Stored on the group widget via g_object_set_data. */
-#define ROWS_KEY "nemo-custom-actions-rows"
-#define MANAGER_KEY "nemo-custom-actions-manager"
-#define ACTION_ID_KEY "nemo-action-id"
+#define ROWS_KEY "dori-custom-actions-rows"
+#define MANAGER_KEY "dori-custom-actions-manager"
+#define ACTION_ID_KEY "dori-action-id"
 
 static void rebuild_custom_actions_rows (AdwPreferencesGroup *group,
-                                         NemoActionManager   *manager);
+                                         DoriActionManager   *manager);
 
 static void
 on_edit_action_clicked (GtkButton *button,
                         gpointer   user_data)
 {
     const char *id = user_data;
-    g_autoptr (NemoActionManager) manager = nemo_action_manager_dup_singleton ();
-    NemoAction *action = nemo_action_manager_get_action (manager, id);
+    g_autoptr (DoriActionManager) manager = dori_action_manager_dup_singleton ();
+    DoriAction *action = dori_action_manager_get_action (manager, id);
     GtkRoot *root = gtk_widget_get_root (GTK_WIDGET (button));
 
     if (action == NULL || !GTK_IS_WIDGET (root))
     {
         return;
     }
-    nemo_action_editor_present (action,
-                                nemo_action_manager_get_actions_dir (manager),
+    dori_action_editor_present (action,
+                                dori_action_manager_get_actions_dir (manager),
                                 GTK_WIDGET (root));
 }
 
@@ -208,10 +208,10 @@ on_delete_response (AdwAlertDialog *dialog,
 
     if (g_strcmp0 (response, "delete") == 0)
     {
-        g_autoptr (NemoActionManager) manager = nemo_action_manager_dup_singleton ();
+        g_autoptr (DoriActionManager) manager = dori_action_manager_dup_singleton ();
         g_autoptr (GError) error = NULL;
 
-        if (!nemo_action_manager_delete_action (manager, id, &error))
+        if (!dori_action_manager_delete_action (manager, id, &error))
         {
             g_warning ("Could not delete action “%s”: %s", id, error->message);
         }
@@ -251,20 +251,20 @@ static void
 on_add_action_clicked (GtkButton *button,
                        gpointer   user_data)
 {
-    g_autoptr (NemoActionManager) manager = nemo_action_manager_dup_singleton ();
+    g_autoptr (DoriActionManager) manager = dori_action_manager_dup_singleton ();
     GtkRoot *root = gtk_widget_get_root (GTK_WIDGET (button));
 
     if (!GTK_IS_WIDGET (root))
     {
         return;
     }
-    nemo_action_editor_present (NULL,
-                                nemo_action_manager_get_actions_dir (manager),
+    dori_action_editor_present (NULL,
+                                dori_action_manager_get_actions_dir (manager),
                                 GTK_WIDGET (root));
 }
 
 static void
-on_manager_changed (NemoActionManager   *manager,
+on_manager_changed (DoriActionManager   *manager,
                     AdwPreferencesGroup *group)
 {
     rebuild_custom_actions_rows (group, manager);
@@ -290,7 +290,7 @@ make_suffix_button (const char  *icon_name,
 
 static void
 rebuild_custom_actions_rows (AdwPreferencesGroup *group,
-                             NemoActionManager   *manager)
+                             DoriActionManager   *manager)
 {
     GList *previous;
     GList *actions;
@@ -308,12 +308,12 @@ rebuild_custom_actions_rows (AdwPreferencesGroup *group,
     g_list_free (previous);
     g_object_set_data (G_OBJECT (group), ROWS_KEY, NULL);
 
-    actions = nemo_action_manager_get_actions (manager);
+    actions = dori_action_manager_get_actions (manager);
 
     for (GList *l = actions; l != NULL; l = l->next)
     {
-        if (nemo_action_manager_is_user_action (manager,
-                                                nemo_action_get_id (l->data)))
+        if (dori_action_manager_is_user_action (manager,
+                                                dori_action_get_id (l->data)))
         {
             has_user_actions = TRUE;
             break;
@@ -336,15 +336,15 @@ rebuild_custom_actions_rows (AdwPreferencesGroup *group,
 
     for (GList *l = actions; l != NULL; l = l->next)
     {
-        NemoAction *action = l->data;
-        const char *name = nemo_action_get_name (action);
-        const char *comment = nemo_action_get_comment (action);
-        const char *icon = nemo_action_get_icon_name (action);
-        const char *group_name = nemo_action_get_group (action);
-        const char *id = nemo_action_get_id (action);
+        DoriAction *action = l->data;
+        const char *name = dori_action_get_name (action);
+        const char *comment = dori_action_get_comment (action);
+        const char *icon = dori_action_get_icon_name (action);
+        const char *group_name = dori_action_get_group (action);
+        const char *id = dori_action_get_id (action);
         AdwActionRow *row;
 
-        if (!nemo_action_manager_is_user_action (manager, id))
+        if (!dori_action_manager_is_user_action (manager, id))
         {
             continue;
         }
@@ -399,7 +399,7 @@ rebuild_custom_actions_rows (AdwPreferencesGroup *group,
 static void
 setup_custom_actions_page (GtkBuilder *builder)
 {
-    NemoActionManager *manager = nemo_action_manager_dup_singleton ();
+    DoriActionManager *manager = dori_action_manager_dup_singleton ();
     AdwPreferencesGroup *group;
     GtkWidget *add_button;
 

@@ -1,4 +1,4 @@
-/* nemo-action-manager.h
+/* dori-action-manager.h
  *
  * Loads bundled context-menu actions and watches the user's custom actions in
  * ~/.local/share/nemo/actions (".nemo_action" files).
@@ -10,36 +10,36 @@
 
 #include <glib-object.h>
 
-#include "nemo-action.h"
+#include "dori-action.h"
 
 G_BEGIN_DECLS
 
-#define NEMO_TYPE_ACTION_MANAGER (nemo_action_manager_get_type ())
+#define DORI_TYPE_ACTION_MANAGER (dori_action_manager_get_type ())
 
-G_DECLARE_FINAL_TYPE (NemoActionManager, nemo_action_manager, NEMO, ACTION_MANAGER, GObject)
+G_DECLARE_FINAL_TYPE (DoriActionManager, dori_action_manager, DORI, ACTION_MANAGER, GObject)
 
-NemoActionManager *nemo_action_manager_dup_singleton (void);
+DoriActionManager *dori_action_manager_dup_singleton (void);
 
 /* The loaded actions, sorted by group then position. Owned by the manager;
  * the list itself must not be modified or freed by the caller. */
-GList             *nemo_action_manager_get_actions   (NemoActionManager *self);
+GList             *dori_action_manager_get_actions   (DoriActionManager *self);
 
-NemoAction        *nemo_action_manager_get_action    (NemoActionManager *self,
+DoriAction        *dori_action_manager_get_action    (DoriActionManager *self,
                                                       const char        *id);
 
 /* Whether the effective action with this ID comes from the user's actions
  * directory. Bundled actions overridden there count as user actions. */
-gboolean           nemo_action_manager_is_user_action (NemoActionManager *self,
+gboolean           dori_action_manager_is_user_action (DoriActionManager *self,
                                                        const char        *id);
 
 /* The folder where the manager looks for .nemo_action files. The returned
  * GFile is owned by the manager; don't free. */
-GFile             *nemo_action_manager_get_actions_dir (NemoActionManager *self);
+GFile             *dori_action_manager_get_actions_dir (DoriActionManager *self);
 
 /* Remove an action by id (the .nemo_action filename). Returns TRUE on success;
  * on failure, error is set. The "changed" signal fires asynchronously when
  * the file monitor notices the deletion. */
-gboolean           nemo_action_manager_delete_action   (NemoActionManager *self,
+gboolean           dori_action_manager_delete_action   (DoriActionManager *self,
                                                         const char        *id,
                                                         GError           **error);
 

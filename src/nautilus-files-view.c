@@ -79,7 +79,7 @@
 #include "nautilus-trash-monitor.h"
 #include "nautilus-ui-utilities.h"
 
-#include "nemo-action-manager.h"
+#include "dori-action-manager.h"
 #include "nautilus-view-info.h"
 #include "nautilus-view-item.h"
 #include "nautilus-view-model.h"
@@ -253,7 +253,7 @@ struct _NautilusFilesView
     GMenuModel *scripts_menu;
 
     /* User-defined custom context-menu actions. */
-    NemoActionManager *action_manager;
+    DoriActionManager *action_manager;
 
     GCancellable *clipboard_cancellable;
 
@@ -7526,12 +7526,12 @@ action_run_custom_action (GSimpleAction *action,
 {
     NautilusFilesView *self = NAUTILUS_FILES_VIEW (user_data);
     const char *id = g_variant_get_string (parameter, NULL);
-    NemoAction *nemo_action;
+    DoriAction *dori_action;
     g_autolist (NautilusFile) selection = NULL;
     g_autoptr (GFile) location = NULL;
 
-    nemo_action = nemo_action_manager_get_action (self->action_manager, id);
-    if (nemo_action == NULL)
+    dori_action = dori_action_manager_get_action (self->action_manager, id);
+    if (dori_action == NULL)
     {
         return;
     }
@@ -7539,7 +7539,7 @@ action_run_custom_action (GSimpleAction *action,
     selection = nautilus_files_view_get_selection (self);
     location = get_current_location (self);
 
-    nemo_action_activate (nemo_action, selection, location, GTK_WIDGET (self));
+    dori_action_activate (dori_action, selection, location, GTK_WIDGET (self));
 }
 
 /* Append the visible custom actions to a context-menu section: ungrouped
@@ -7549,7 +7549,7 @@ build_custom_actions_menu (NautilusFilesView *self,
                            GMenu             *section,
                            GList             *selection)
 {
-    GList *actions = nemo_action_manager_get_actions (self->action_manager);
+    GList *actions = dori_action_manager_get_actions (self->action_manager);
     g_autoptr (GMenu) ungrouped = g_menu_new ();
     g_autoptr (GHashTable) groups = g_hash_table_new_full (g_str_hash, g_str_equal,
                                                            g_free, g_object_unref);
@@ -7557,18 +7557,18 @@ build_custom_actions_menu (NautilusFilesView *self,
 
     for (GList *l = actions; l != NULL; l = l->next)
     {
-        NemoAction *nemo_action = l->data;
+        DoriAction *dori_action = l->data;
         const char *group_name;
         const char *icon_name;
         GMenu *target;
         g_autoptr (GMenuItem) item = NULL;
 
-        if (!nemo_action_is_visible (nemo_action, selection))
+        if (!dori_action_is_visible (dori_action, selection))
         {
             continue;
         }
 
-        group_name = nemo_action_get_group (nemo_action);
+        group_name = dori_action_get_group (dori_action);
         if (group_name != NULL && *group_name != '\0')
         {
             target = g_hash_table_lookup (groups, group_name);
@@ -7584,11 +7584,11 @@ build_custom_actions_menu (NautilusFilesView *self,
             target = ungrouped;
         }
 
-        item = g_menu_item_new (nemo_action_get_name (nemo_action), NULL);
+        item = g_menu_item_new (dori_action_get_name (dori_action), NULL);
         g_menu_item_set_action_and_target_value (item, "view.run-custom-action",
-                                                 g_variant_new_string (nemo_action_get_id (nemo_action)));
+                                                 g_variant_new_string (dori_action_get_id (dori_action)));
 
-        icon_name = nemo_action_get_icon_name (nemo_action);
+        icon_name = dori_action_get_icon_name (dori_action);
         if (icon_name != NULL)
         {
             g_autoptr (GIcon) icon = g_themed_icon_new (icon_name);
@@ -10498,7 +10498,7 @@ nautilus_files_view_init (NautilusFilesView *self)
     g_signal_connect_object (self->view_action_group, "action-state-changed::sort",
                              G_CALLBACK (on_sort_action_state_changed), self, 0);
 
-    self->action_manager = nemo_action_manager_dup_singleton ();
+    self->action_manager = dori_action_manager_dup_singleton ();
     g_signal_connect_object (self->action_manager, "changed",
                              G_CALLBACK (schedule_update_context_menus), self,
                              G_CONNECT_SWAPPED);

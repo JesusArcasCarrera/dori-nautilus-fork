@@ -1,4 +1,4 @@
-/* nemo-action-manager.c
+/* dori-action-manager.c
  *
  * Loads bundled and user-defined context-menu actions, and watches the latter.
  *
@@ -7,7 +7,7 @@
 
 #include <config.h>
 
-#include "nemo-action-manager.h"
+#include "dori-action-manager.h"
 
 #include <errno.h>
 #include <gio/gio.h>
@@ -24,27 +24,27 @@ enum
 
 static guint signals[LAST_SIGNAL] = { 0 };
 
-struct _NemoActionManager
+struct _DoriActionManager
 {
     GObject parent_instance;
 
     char         *actions_dir;
     GFile        *actions_location;
     GFileMonitor *monitor;
-    GList        *actions;        /* NemoAction, owned */
+    GList        *actions;        /* DoriAction, owned */
     guint         reload_idle_id;
 };
 
-G_DEFINE_FINAL_TYPE (NemoActionManager, nemo_action_manager, G_TYPE_OBJECT)
+G_DEFINE_FINAL_TYPE (DoriActionManager, dori_action_manager, G_TYPE_OBJECT)
 
 static int
 compare_actions (gconstpointer a,
                  gconstpointer b)
 {
-    NemoAction *action_a = (NemoAction *) a;
-    NemoAction *action_b = (NemoAction *) b;
-    const char *group_a = nemo_action_get_group (action_a);
-    const char *group_b = nemo_action_get_group (action_b);
+    DoriAction *action_a = (DoriAction *) a;
+    DoriAction *action_b = (DoriAction *) b;
+    const char *group_a = dori_action_get_group (action_a);
+    const char *group_b = dori_action_get_group (action_b);
     int cmp;
 
     cmp = g_strcmp0 (group_a != NULL ? group_a : "",
@@ -54,17 +54,17 @@ compare_actions (gconstpointer a,
         return cmp;
     }
 
-    if (nemo_action_get_position (action_a) != nemo_action_get_position (action_b))
+    if (dori_action_get_position (action_a) != dori_action_get_position (action_b))
     {
-        return nemo_action_get_position (action_a) - nemo_action_get_position (action_b);
+        return dori_action_get_position (action_a) - dori_action_get_position (action_b);
     }
 
-    return g_strcmp0 (nemo_action_get_name (action_a),
-                      nemo_action_get_name (action_b));
+    return g_strcmp0 (dori_action_get_name (action_a),
+                      dori_action_get_name (action_b));
 }
 
 static void
-load_actions_from_directory (NemoActionManager *self,
+load_actions_from_directory (DoriActionManager *self,
                              GFile             *directory,
                              GHashTable        *loaded_ids)
 {
@@ -94,7 +94,7 @@ load_actions_from_directory (NemoActionManager *self,
             !g_hash_table_contains (loaded_ids, name))
         {
             g_autoptr (GFile) file = g_file_get_child (directory, name);
-            NemoAction *action = nemo_action_new (file);
+            DoriAction *action = dori_action_new (file);
 
             if (action != NULL)
             {
@@ -108,7 +108,7 @@ load_actions_from_directory (NemoActionManager *self,
 }
 
 static void
-load_actions (NemoActionManager *self)
+load_actions (DoriActionManager *self)
 {
     g_autoptr (GHashTable) loaded_ids = NULL;
     const char * const *system_data_dirs;
@@ -143,7 +143,7 @@ load_actions (NemoActionManager *self)
 static gboolean
 reload_idle (gpointer data)
 {
-    NemoActionManager *self = data;
+    DoriActionManager *self = data;
 
     self->reload_idle_id = 0;
     load_actions (self);
@@ -153,7 +153,7 @@ reload_idle (gpointer data)
 }
 
 static void
-on_directory_changed (NemoActionManager *self,
+on_directory_changed (DoriActionManager *self,
                       GFile             *file,
                       GFile             *other_file,
                       GFileMonitorEvent  event_type)
@@ -167,11 +167,11 @@ on_directory_changed (NemoActionManager *self,
 }
 
 static void
-nemo_action_manager_constructed (GObject *object)
+dori_action_manager_constructed (GObject *object)
 {
-    NemoActionManager *self = NEMO_ACTION_MANAGER (object);
+    DoriActionManager *self = DORI_ACTION_MANAGER (object);
 
-    G_OBJECT_CLASS (nemo_action_manager_parent_class)->constructed (object);
+    G_OBJECT_CLASS (dori_action_manager_parent_class)->constructed (object);
 
     g_autoptr (GError) monitor_error = NULL;
 
@@ -203,9 +203,9 @@ nemo_action_manager_constructed (GObject *object)
 }
 
 static void
-nemo_action_manager_finalize (GObject *object)
+dori_action_manager_finalize (GObject *object)
 {
-    NemoActionManager *self = NEMO_ACTION_MANAGER (object);
+    DoriActionManager *self = DORI_ACTION_MANAGER (object);
 
     g_clear_handle_id (&self->reload_idle_id, g_source_remove);
     g_clear_object (&self->monitor);
@@ -213,37 +213,37 @@ nemo_action_manager_finalize (GObject *object)
     g_clear_pointer (&self->actions_dir, g_free);
     g_list_free_full (self->actions, g_object_unref);
 
-    G_OBJECT_CLASS (nemo_action_manager_parent_class)->finalize (object);
+    G_OBJECT_CLASS (dori_action_manager_parent_class)->finalize (object);
 }
 
 static void
-nemo_action_manager_class_init (NemoActionManagerClass *klass)
+dori_action_manager_class_init (DoriActionManagerClass *klass)
 {
     GObjectClass *object_class = G_OBJECT_CLASS (klass);
 
-    object_class->constructed = nemo_action_manager_constructed;
-    object_class->finalize = nemo_action_manager_finalize;
+    object_class->constructed = dori_action_manager_constructed;
+    object_class->finalize = dori_action_manager_finalize;
 
     signals[CHANGED] = g_signal_new ("changed",
-                                     NEMO_TYPE_ACTION_MANAGER,
+                                     DORI_TYPE_ACTION_MANAGER,
                                      G_SIGNAL_RUN_LAST,
                                      0, NULL, NULL, NULL,
                                      G_TYPE_NONE, 0);
 }
 
 static void
-nemo_action_manager_init (NemoActionManager *self)
+dori_action_manager_init (DoriActionManager *self)
 {
 }
 
-NemoActionManager *
-nemo_action_manager_dup_singleton (void)
+DoriActionManager *
+dori_action_manager_dup_singleton (void)
 {
-    static NemoActionManager *singleton = NULL;
+    static DoriActionManager *singleton = NULL;
 
     if (singleton == NULL)
     {
-        singleton = g_object_new (NEMO_TYPE_ACTION_MANAGER, NULL);
+        singleton = g_object_new (DORI_TYPE_ACTION_MANAGER, NULL);
         g_object_add_weak_pointer (G_OBJECT (singleton), (gpointer *) &singleton);
 
         return singleton;
@@ -253,18 +253,18 @@ nemo_action_manager_dup_singleton (void)
 }
 
 GList *
-nemo_action_manager_get_actions (NemoActionManager *self)
+dori_action_manager_get_actions (DoriActionManager *self)
 {
     return self->actions;
 }
 
-NemoAction *
-nemo_action_manager_get_action (NemoActionManager *self,
+DoriAction *
+dori_action_manager_get_action (DoriActionManager *self,
                                 const char        *id)
 {
     for (GList *l = self->actions; l != NULL; l = l->next)
     {
-        if (g_strcmp0 (nemo_action_get_id (l->data), id) == 0)
+        if (g_strcmp0 (dori_action_get_id (l->data), id) == 0)
         {
             return l->data;
         }
@@ -274,12 +274,12 @@ nemo_action_manager_get_action (NemoActionManager *self,
 }
 
 gboolean
-nemo_action_manager_is_user_action (NemoActionManager *self,
+dori_action_manager_is_user_action (DoriActionManager *self,
                                     const char        *id)
 {
     g_autoptr (GFile) file = NULL;
 
-    g_return_val_if_fail (NEMO_IS_ACTION_MANAGER (self), FALSE);
+    g_return_val_if_fail (DORI_IS_ACTION_MANAGER (self), FALSE);
     g_return_val_if_fail (id != NULL, FALSE);
 
     file = g_file_get_child (self->actions_location, id);
@@ -288,19 +288,19 @@ nemo_action_manager_is_user_action (NemoActionManager *self,
 }
 
 GFile *
-nemo_action_manager_get_actions_dir (NemoActionManager *self)
+dori_action_manager_get_actions_dir (DoriActionManager *self)
 {
     return self->actions_location;
 }
 
 gboolean
-nemo_action_manager_delete_action (NemoActionManager *self,
+dori_action_manager_delete_action (DoriActionManager *self,
                                    const char        *id,
                                    GError           **error)
 {
     g_autoptr (GFile) file = NULL;
 
-    g_return_val_if_fail (NEMO_IS_ACTION_MANAGER (self), FALSE);
+    g_return_val_if_fail (DORI_IS_ACTION_MANAGER (self), FALSE);
     g_return_val_if_fail (id != NULL, FALSE);
 
     file = g_file_get_child (self->actions_location, id);

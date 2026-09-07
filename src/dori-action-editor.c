@@ -1,4 +1,4 @@
-/* nemo-action-editor.c
+/* dori-action-editor.c
  *
  * Modal dialog to create or edit a .nemo_action file. Builds the form
  * programmatically with libadwaita rows so no extra resource is needed.
@@ -8,14 +8,14 @@
 
 #include <config.h>
 
-#include "nemo-action-editor.h"
+#include "dori-action-editor.h"
 
 #include <glib/gi18n.h>
 #include <string.h>
 
 #define ACTION_GROUP "Nemo Action"
 
-struct _NemoActionEditor
+struct _DoriActionEditor
 {
     AdwDialog parent_instance;
 
@@ -32,7 +32,7 @@ struct _NemoActionEditor
     AdwEntryRow *group_entry;
 };
 
-G_DEFINE_FINAL_TYPE (NemoActionEditor, nemo_action_editor, ADW_TYPE_DIALOG)
+G_DEFINE_FINAL_TYPE (DoriActionEditor, dori_action_editor, ADW_TYPE_DIALOG)
 
 static const char * const TYPE_NICKS[] =
 {
@@ -150,7 +150,7 @@ static void
 on_save_clicked (GtkButton *button,
                  gpointer   user_data)
 {
-    NemoActionEditor *self = NEMO_ACTION_EDITOR (user_data);
+    DoriActionEditor *self = DORI_ACTION_EDITOR (user_data);
     g_autoptr (GKeyFile) kf = g_key_file_new ();
     g_autofree char *filename = NULL;
     g_autoptr (GFile) target = NULL;
@@ -212,7 +212,7 @@ on_save_clicked (GtkButton *button,
 }
 
 static void
-nemo_action_editor_init (NemoActionEditor *self)
+dori_action_editor_init (DoriActionEditor *self)
 {
     GtkWidget *toolbar;
     GtkWidget *header;
@@ -328,41 +328,41 @@ nemo_action_editor_init (NemoActionEditor *self)
 }
 
 static void
-nemo_action_editor_finalize (GObject *object)
+dori_action_editor_finalize (GObject *object)
 {
-    NemoActionEditor *self = NEMO_ACTION_EDITOR (object);
+    DoriActionEditor *self = DORI_ACTION_EDITOR (object);
 
     g_clear_object (&self->actions_dir);
     g_clear_pointer (&self->existing_id, g_free);
 
-    G_OBJECT_CLASS (nemo_action_editor_parent_class)->finalize (object);
+    G_OBJECT_CLASS (dori_action_editor_parent_class)->finalize (object);
 }
 
 static void
-nemo_action_editor_class_init (NemoActionEditorClass *klass)
+dori_action_editor_class_init (DoriActionEditorClass *klass)
 {
-    G_OBJECT_CLASS (klass)->finalize = nemo_action_editor_finalize;
+    G_OBJECT_CLASS (klass)->finalize = dori_action_editor_finalize;
 }
 
 void
-nemo_action_editor_present (NemoAction *action,
+dori_action_editor_present (DoriAction *action,
                             GFile      *actions_dir,
                             GtkWidget  *parent)
 {
-    NemoActionEditor *self;
+    DoriActionEditor *self;
 
     g_return_if_fail (G_IS_FILE (actions_dir));
 
-    self = g_object_new (NEMO_TYPE_ACTION_EDITOR, NULL);
+    self = g_object_new (DORI_TYPE_ACTION_EDITOR, NULL);
     self->actions_dir = g_object_ref (actions_dir);
 
     if (action != NULL)
     {
-        const char *name = nemo_action_get_name (action);
-        const char *exec = nemo_action_get_exec (action);
-        const char *group = nemo_action_get_group (action);
+        const char *name = dori_action_get_name (action);
+        const char *exec = dori_action_get_exec (action);
+        const char *group = dori_action_get_group (action);
 
-        self->existing_id = g_strdup (nemo_action_get_id (action));
+        self->existing_id = g_strdup (dori_action_get_id (action));
 
         if (name != NULL)
         {
@@ -377,9 +377,9 @@ nemo_action_editor_present (NemoAction *action,
             gtk_editable_set_text (GTK_EDITABLE (self->group_entry), group);
         }
         adw_combo_row_set_selected (self->type_combo,
-            type_nick_to_index (nemo_action_get_type_string (action)));
+            type_nick_to_index (dori_action_get_type_string (action)));
         adw_combo_row_set_selected (self->selection_combo,
-            selection_nick_to_index (nemo_action_get_selection_string (action)));
+            selection_nick_to_index (dori_action_get_selection_string (action)));
     }
 
     adw_dialog_present (ADW_DIALOG (self), parent);

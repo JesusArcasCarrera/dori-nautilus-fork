@@ -1,4 +1,4 @@
-/* nemo-action.c
+/* dori-action.c
  *
  * A single user-defined context-menu action loaded from a ".nemo_action"
  * GKeyFile (group [Nemo Action]), compatible with the Cinnamon Nemo format.
@@ -8,7 +8,7 @@
 
 #include <config.h>
 
-#include "nemo-action.h"
+#include "dori-action.h"
 
 #include <string.h>
 #include <glib/gi18n.h>
@@ -19,10 +19,10 @@
 
 typedef enum
 {
-    NEMO_ACTION_TYPE_COMMAND,
-    NEMO_ACTION_TYPE_CREATE_FROM_CLIPBOARD,
-    NEMO_ACTION_TYPE_OVERWRITE_FROM_CLIPBOARD,
-} NemoActionType;
+    DORI_ACTION_TYPE_COMMAND,
+    DORI_ACTION_TYPE_CREATE_FROM_CLIPBOARD,
+    DORI_ACTION_TYPE_OVERWRITE_FROM_CLIPBOARD,
+} DoriActionType;
 
 typedef enum
 {
@@ -33,7 +33,7 @@ typedef enum
     SELECTION_COUNT,      /* exactly self->selection_count */
 } SelectionKind;
 
-struct _NemoAction
+struct _DoriAction
 {
     GObject parent_instance;
 
@@ -45,7 +45,7 @@ struct _NemoAction
     char *group;
     int   position;
 
-    NemoActionType type;
+    DoriActionType type;
 
     SelectionKind selection_kind;
     int           selection_count;
@@ -55,12 +55,12 @@ struct _NemoAction
     GStrv dependencies;   /* NULL == no required programs */
 };
 
-G_DEFINE_FINAL_TYPE (NemoAction, nemo_action, G_TYPE_OBJECT)
+G_DEFINE_FINAL_TYPE (DoriAction, dori_action, G_TYPE_OBJECT)
 
 static void
-nemo_action_finalize (GObject *object)
+dori_action_finalize (GObject *object)
 {
-    NemoAction *self = NEMO_ACTION (object);
+    DoriAction *self = DORI_ACTION (object);
 
     g_free (self->id);
     g_free (self->name);
@@ -72,17 +72,17 @@ nemo_action_finalize (GObject *object)
     g_strfreev (self->mimetypes);
     g_strfreev (self->dependencies);
 
-    G_OBJECT_CLASS (nemo_action_parent_class)->finalize (object);
+    G_OBJECT_CLASS (dori_action_parent_class)->finalize (object);
 }
 
 static void
-nemo_action_class_init (NemoActionClass *klass)
+dori_action_class_init (DoriActionClass *klass)
 {
-    G_OBJECT_CLASS (klass)->finalize = nemo_action_finalize;
+    G_OBJECT_CLASS (klass)->finalize = dori_action_finalize;
 }
 
 static void
-nemo_action_init (NemoAction *self)
+dori_action_init (DoriAction *self)
 {
     self->selection_kind = SELECTION_ANY;
     self->selection_count = -1;
@@ -90,7 +90,7 @@ nemo_action_init (NemoAction *self)
 }
 
 static void
-parse_selection (NemoAction *self,
+parse_selection (DoriAction *self,
                  const char *value)
 {
     char *end = NULL;
@@ -132,8 +132,8 @@ parse_selection (NemoAction *self,
     self->selection_kind = SELECTION_ANY;
 }
 
-NemoAction *
-nemo_action_new (GFile *file)
+DoriAction *
+dori_action_new (GFile *file)
 {
     g_autoptr (GKeyFile) key_file = g_key_file_new ();
     g_autofree char *path = g_file_get_path (file);
@@ -142,8 +142,8 @@ nemo_action_new (GFile *file)
     g_autofree char *name = NULL;
     g_autofree char *type_str = NULL;
     g_autofree char *selection = NULL;
-    NemoActionType type = NEMO_ACTION_TYPE_COMMAND;
-    NemoAction *self;
+    DoriActionType type = DORI_ACTION_TYPE_COMMAND;
+    DoriAction *self;
 
     if (path == NULL ||
         !g_key_file_load_from_file (key_file, path, G_KEY_FILE_NONE, &error))
@@ -166,11 +166,11 @@ nemo_action_new (GFile *file)
 
     if (g_strcmp0 (type_str, "create-from-clipboard") == 0)
     {
-        type = NEMO_ACTION_TYPE_CREATE_FROM_CLIPBOARD;
+        type = DORI_ACTION_TYPE_CREATE_FROM_CLIPBOARD;
     }
     else if (g_strcmp0 (type_str, "overwrite-from-clipboard") == 0)
     {
-        type = NEMO_ACTION_TYPE_OVERWRITE_FROM_CLIPBOARD;
+        type = DORI_ACTION_TYPE_OVERWRITE_FROM_CLIPBOARD;
     }
 
     if (name == NULL)
@@ -178,13 +178,13 @@ nemo_action_new (GFile *file)
         g_warning ("Nemo action: %s has no Name, ignoring", path);
         return NULL;
     }
-    if (type == NEMO_ACTION_TYPE_COMMAND && exec == NULL)
+    if (type == DORI_ACTION_TYPE_COMMAND && exec == NULL)
     {
         g_warning ("Nemo action: %s has no Exec, ignoring", path);
         return NULL;
     }
 
-    self = g_object_new (NEMO_TYPE_ACTION, NULL);
+    self = g_object_new (DORI_TYPE_ACTION, NULL);
 
     self->id = g_file_get_basename (file);
     self->name = g_steal_pointer (&name);
@@ -205,64 +205,64 @@ nemo_action_new (GFile *file)
 }
 
 const char *
-nemo_action_get_id (NemoAction *self)
+dori_action_get_id (DoriAction *self)
 {
     return self->id;
 }
 
 const char *
-nemo_action_get_name (NemoAction *self)
+dori_action_get_name (DoriAction *self)
 {
     return self->name;
 }
 
 const char *
-nemo_action_get_comment (NemoAction *self)
+dori_action_get_comment (DoriAction *self)
 {
     return self->comment;
 }
 
 const char *
-nemo_action_get_icon_name (NemoAction *self)
+dori_action_get_icon_name (DoriAction *self)
 {
     return self->icon_name;
 }
 
 const char *
-nemo_action_get_group (NemoAction *self)
+dori_action_get_group (DoriAction *self)
 {
     return self->group;
 }
 
 int
-nemo_action_get_position (NemoAction *self)
+dori_action_get_position (DoriAction *self)
 {
     return self->position;
 }
 
 const char *
-nemo_action_get_exec (NemoAction *self)
+dori_action_get_exec (DoriAction *self)
 {
     return self->exec;
 }
 
 const char *
-nemo_action_get_type_string (NemoAction *self)
+dori_action_get_type_string (DoriAction *self)
 {
     switch (self->type)
     {
-        case NEMO_ACTION_TYPE_CREATE_FROM_CLIPBOARD:
+        case DORI_ACTION_TYPE_CREATE_FROM_CLIPBOARD:
             return "create-from-clipboard";
-        case NEMO_ACTION_TYPE_OVERWRITE_FROM_CLIPBOARD:
+        case DORI_ACTION_TYPE_OVERWRITE_FROM_CLIPBOARD:
             return "overwrite-from-clipboard";
-        case NEMO_ACTION_TYPE_COMMAND:
+        case DORI_ACTION_TYPE_COMMAND:
         default:
             return "command";
     }
 }
 
 const char *
-nemo_action_get_selection_string (NemoAction *self)
+dori_action_get_selection_string (DoriAction *self)
 {
     switch (self->selection_kind)
     {
@@ -364,7 +364,7 @@ file_matches_mimetypes (NautilusFile *file,
 }
 
 gboolean
-nemo_action_is_visible (NemoAction *self,
+dori_action_is_visible (DoriAction *self,
                         GList      *selection)
 {
     guint count = g_list_length (selection);
@@ -470,7 +470,7 @@ append_quoted_list (GString  *out,
 /* Expand the Exec string, substituting the Nemo placeholders and shell-quoting
  * every interpolated path so the result is safe to hand to "sh -c". */
 static char *
-build_command (NemoAction *self,
+build_command (DoriAction *self,
                GList      *selection,
                GFile      *parent_location)
 {
@@ -559,7 +559,7 @@ build_command (NemoAction *self,
 }
 
 static void
-run_command (NemoAction *self,
+run_command (DoriAction *self,
              GList      *selection,
              GFile      *parent_location)
 {
@@ -582,7 +582,7 @@ run_command (NemoAction *self,
 
 typedef struct
 {
-    NemoActionType type;
+    DoriActionType type;
     GFile         *target;   /* file to overwrite, or folder to create into */
 } ClipboardData;
 
@@ -611,7 +611,7 @@ on_clipboard_text (GObject      *source,
         return;
     }
 
-    if (data->type == NEMO_ACTION_TYPE_OVERWRITE_FROM_CLIPBOARD)
+    if (data->type == DORI_ACTION_TYPE_OVERWRITE_FROM_CLIPBOARD)
     {
         if (!g_file_replace_contents (data->target, text, strlen (text), NULL,
                                       FALSE, G_FILE_CREATE_NONE, NULL, NULL, &error))
@@ -658,7 +658,7 @@ on_clipboard_text (GObject      *source,
 }
 
 void
-nemo_action_activate (NemoAction *self,
+dori_action_activate (DoriAction *self,
                       GList      *selection,
                       GFile      *parent_location,
                       GtkWidget  *widget)
@@ -666,9 +666,9 @@ nemo_action_activate (NemoAction *self,
     GdkClipboard *clipboard;
     ClipboardData *data;
 
-    g_return_if_fail (NEMO_IS_ACTION (self));
+    g_return_if_fail (DORI_IS_ACTION (self));
 
-    if (self->type == NEMO_ACTION_TYPE_COMMAND)
+    if (self->type == DORI_ACTION_TYPE_COMMAND)
     {
         run_command (self, selection, parent_location);
         return;
@@ -680,7 +680,7 @@ nemo_action_activate (NemoAction *self,
     data = g_new0 (ClipboardData, 1);
     data->type = self->type;
 
-    if (self->type == NEMO_ACTION_TYPE_OVERWRITE_FROM_CLIPBOARD)
+    if (self->type == DORI_ACTION_TYPE_OVERWRITE_FROM_CLIPBOARD)
     {
         if (selection == NULL)
         {

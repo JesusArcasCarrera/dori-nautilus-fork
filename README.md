@@ -70,7 +70,9 @@ Nemo's `.nemo_action`** so existing actions from that ecosystem mostly drop
 in. The fork can also install bundled actions under
 `$XDG_DATA_DIRS/nautilus/actions/`; a personal action with the same filename
 always takes precedence and only personal actions appear in the preferences
-editor.
+editor. The implementation is named `DoriAction` internally; Nemo remains in
+the external filename, section and directory names solely for format
+compatibility.
 
 Three action types are supported:
 
