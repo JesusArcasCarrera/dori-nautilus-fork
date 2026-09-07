@@ -160,6 +160,19 @@ Icon-Name=visual-studio-code
 
 ### Direct PDF, image and video operations
 
+Architecture decision (2026-09-07): `.nemo_action` files remain Dori's
+connector to commands. Dori keeps its loader, editor, parameter dialogs,
+selection order and operation tracking, and ships the action definitions and
+`nautilus-media-tools` helper below. Commands may also come from independent
+projects; using them does not require a central execution service.
+
+The separate `acciones` project is deferred pending a focused design for an
+application-queryable index of capabilities. Do not move this catalog or its
+implementations there as part of Dori work. If that service is adopted later,
+an action can invoke it through `Exec` while retaining its `.nemo_action`
+identity and Dori integration. The former `nautilus-acciones.py` extension is
+not the integration path.
+
 The fork ships type-aware submenus for common operations that should not
 require opening a separate editor:
 

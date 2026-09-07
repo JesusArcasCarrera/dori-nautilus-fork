@@ -4,6 +4,18 @@ Documento vivo para el editor gráfico de `.nemo_action` (feature 6b).
 Cuando llegue el momento de mejorarlo, leer esto primero — evita
 redescubrir la arquitectura y los puntos sensibles.
 
+## Acuerdo de integración (2026-09-07)
+
+Nemo Actions sigue siendo el conector de Dori: define la entrada del menú,
+sus condiciones y parámetros, e invoca el CLI correspondiente mediante `Exec`.
+El catálogo y el auxiliar multimedia que distribuye Dori se mantienen aquí.
+El proyecto `acciones` queda aplazado hasta estudiar su papel como índice de
+capacidades consultable por aplicaciones; no es un requisito de ejecución
+ni autoriza trasladar allí las operaciones de Dori. Una integración futura
+puede cambiar el comando de una `.nemo_action` sin sustituir este soporte.
+La extensión Python `nautilus-acciones.py` se descartó como integración del
+menú; no debe reactivarse para este propósito.
+
 ## Estado actual (commit `preferences: add a graphical editor for custom .nemo_action files`)
 
 Lo que ya funciona:
@@ -52,7 +64,7 @@ poner editando el fichero a mano:
 | `Placement`  | `open` → la entrada va al bloque de «Abrir en terminal» (extensiones) en vez del bloque de acciones. **Expuesto** ya como combo «Menu block». | — |
 | `Prompt` / `Prompt-Default` | Pregunta previa; la respuesta llega como `%p` y `$DORI_PROMPT`. **Expuestos** como pregunta y valor inicial. |
 | `Prompt-Mode` | `always` abre siempre el diálogo; `split` crea una fila partida que ejecuta el predeterminado o permite configurarlo. **Expuesto** como combo «Activation». |
-| `Prompt-Display-Format` | Formato localizado con un único `%s` para mostrar el valor efectivo en la fila partida. **Expuesto** y validado en el editor. |
+| `Prompt-Display-Format` | Clave heredada, todavía expuesta y validada en el editor por compatibilidad. El menú muestra solo el nombre; el valor efectivo se consulta en el diálogo de parámetros. |
 | `Selection` exacto | Número exacto de ficheros seleccionados.   | Sustituir la combo por una combo con opción **Exactly N** y un spin asociado. |
 
 ### Validación y feedback
