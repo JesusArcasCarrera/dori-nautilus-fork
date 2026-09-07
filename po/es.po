@@ -14034,3 +14034,6 @@ msgstr "Los archivos normales dentro de las subcarpetas de «%s» se moverán a 
 #: src/resources/menu/nautilus-files-view-context-menus.ui
 msgid "_Flatten Contents…"
 msgstr "_Aplanar contenido…"
+
+msgid "Pasted text"
+msgstr "Texto pegado"

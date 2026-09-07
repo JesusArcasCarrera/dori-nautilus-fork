@@ -41,6 +41,7 @@
 #include "nautilus-batch-rename-dialog.h"
 #include "nautilus-batch-rename-utilities.h"
 #include "nautilus-clipboard.h"
+#include "nautilus-pasted-text.h"
 #include "nautilus-compress-dialog.h"
 #include "nautilus-dbus-launcher.h"
 #include "nautilus-directory.h"
@@ -3429,6 +3430,51 @@ paste_value_received_callback (GObject      *source_object,
     }
 }
 
+/* Clipboard held plain text and no files: "Paste" creates a new file with it,
+ * named after the detected content (code, Markdown, LaTeX, ... or .txt). */
+static void
+paste_text_received_callback (GObject      *source_object,
+                              GAsyncResult *result,
+                              gpointer      user_data)
+{
+    g_autoptr (PasteCallbackData) data = user_data;
+    NautilusFilesView *view = data->view;
+    g_autoptr (GError) error = NULL;
+    g_autofree char *text = NULL;
+    g_autofree char *filename = NULL;
+    const char *extension;
+
+    text = gdk_clipboard_read_text_finish (GDK_CLIPBOARD (source_object), result, &error);
+    if (text == NULL)
+    {
+        if (!g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+        {
+            g_warning ("Could not read clipboard text: %s", error->message);
+        }
+        return;
+    }
+    if (*text == '\0' || view->in_destruction)
+    {
+        return;
+    }
+
+    extension = nautilus_pasted_text_guess_extension (text, -1);
+    /* Translators: This is used to auto-generate a file name for text pasted
+     * from the clipboard i.e. "Pasted text.py", "Pasted text 2.md", ... */
+    filename = g_strdup_printf ("%s.%s", _("Pasted text"), extension);
+
+    nautilus_files_view_new_file_with_initial_contents (view, data->dest_uri,
+                                                        filename, text, strlen (text));
+}
+
+static gboolean
+clipboard_formats_contain_files (GdkContentFormats *formats)
+{
+    return gdk_content_formats_contain_gtype (formats, NAUTILUS_TYPE_CLIPBOARD) ||
+           gdk_content_formats_contain_gtype (formats, GDK_TYPE_FILE_LIST) ||
+           gdk_content_formats_contain_gtype (formats, G_TYPE_FILE);
+}
+
 static void
 paste_files (NautilusFilesView *view,
              gchar             *dest_uri,
@@ -3443,6 +3489,20 @@ paste_files (NautilusFilesView *view,
     formats = gdk_clipboard_get_formats (clipboard);
 
     real_dest_uri = dest_uri != NULL ? dest_uri : nautilus_files_view_get_backing_uri (view);
+
+    if (!clipboard_formats_contain_files (formats) &&
+        !gdk_content_formats_contain_gtype (formats, GDK_TYPE_TEXTURE) &&
+        gdk_content_formats_contain_gtype (formats, G_TYPE_STRING))
+    {
+        data = g_new0 (PasteCallbackData, 1);
+        data->dest_uri = real_dest_uri;
+        data->view = view;
+
+        gdk_clipboard_read_text_async (clipboard, view->clipboard_cancellable,
+                                       paste_text_received_callback,
+                                       g_steal_pointer (&data));
+        return;
+    }
 
     if (gdk_content_formats_contain_gtype (formats, GDK_TYPE_TEXTURE))
     {
@@ -7805,15 +7865,17 @@ update_actions_state_for_clipboard_targets (NautilusFilesView *self)
 {
     GdkClipboard *clipboard;
     GdkContentFormats *formats;
+    gboolean is_files_copied;
     gboolean is_data_copied;
     GAction *action;
 
     clipboard = gtk_widget_get_clipboard (GTK_WIDGET (self));
     formats = gdk_clipboard_get_formats (clipboard);
-    is_data_copied = gdk_content_formats_contain_gtype (formats, NAUTILUS_TYPE_CLIPBOARD) ||
-                     gdk_content_formats_contain_gtype (formats, GDK_TYPE_FILE_LIST) ||
-                     gdk_content_formats_contain_gtype (formats, G_TYPE_FILE) ||
-                     gdk_content_formats_contain_gtype (formats, GDK_TYPE_TEXTURE);
+    is_files_copied = clipboard_formats_contain_files (formats);
+    /* Images and plain text are pasted as new files, so they count too. */
+    is_data_copied = is_files_copied ||
+                     gdk_content_formats_contain_gtype (formats, GDK_TYPE_TEXTURE) ||
+                     gdk_content_formats_contain_gtype (formats, G_TYPE_STRING);
 
     action = g_action_map_lookup_action (G_ACTION_MAP (self->view_action_group),
                                          "paste");
@@ -7832,7 +7894,7 @@ update_actions_state_for_clipboard_targets (NautilusFilesView *self)
                                          "create-link");
 
     g_simple_action_set_enabled (G_SIMPLE_ACTION (action),
-                                 is_data_copied && g_action_get_enabled (action));
+                                 is_files_copied && g_action_get_enabled (action));
 
     if (gdk_content_formats_contain_gtype (formats, NAUTILUS_TYPE_CLIPBOARD))
     {

@@ -61,6 +61,17 @@ via the icon widget's own opacity, so the filename label stays at full
 opacity and readable) and overlays the dashed border and scissors on top.
 You still see what you cut.
 
+### Paste text or images as new files
+
+"Paste" on the folder background (and Ctrl+V) is never greyed out just because
+the clipboard holds no files. Text becomes a new file named after what it looks
+like — `Pasted text.py`, `.md`, `.tex`, `.json`, `.sh`, `.html`, `.sql`, … and
+plain `.txt` when nothing matches — using the shared-mime magic first
+(shebangs, XML, PDF…) and a small set of syntax heuristics
+(`src/nautilus-pasted-text.c`). Images are saved as `Pasted image.png`. The
+file is created through the regular file-operations job, so it gets a unique
+name on collision, undo support, and is revealed in the view.
+
 ### Custom context-menu actions (`.nemo_action`)
 
 A native system for user-defined entries in the context menu. Drop files into
