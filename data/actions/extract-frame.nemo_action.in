@@ -1,0 +1,20 @@
+[Nemo Action]
+Name=Extract one frame
+Name[es]=Extraer un fotograma
+Comment=Save a single frame of the video as PNG (the 100th by default)
+Comment[es]=Guarda un solo fotograma del vídeo como PNG (el 100 por defecto)
+Icon-Name=camera-photo-symbolic
+Exec=@media_tools_path@ extract-frame --value %p %F
+Prompt=Frame number (0 is the first frame)
+Prompt[es]=Número de fotograma (0 es el primero)
+Prompt-Default=100
+Prompt-Mode=split
+Prompt-Display-Format=frame %s
+Prompt-Display-Format[es]=fotograma %s
+Group=Video
+Group[es]=Vídeo
+Section=extraction
+Position=38
+Selection=Single
+Mimetypes=video/*;
+Dependencies=python3;ffmpeg;ffprobe;

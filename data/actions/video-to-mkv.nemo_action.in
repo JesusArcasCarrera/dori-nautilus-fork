@@ -7,6 +7,7 @@ Icon-Name=video-x-generic-symbolic
 Exec=@media_tools_path@ video-to-mkv %F
 Group=Video
 Group[es]=Vídeo
+Section=conversion
 Position=10
 Selection=Any
 Mimetypes=video/*;

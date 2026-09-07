@@ -1,0 +1,19 @@
+[Nemo Action]
+Name=Extract frames
+Name[es]=Extraer fotogramas
+Comment=Create a folder containing PNG frames at the selected rate
+Comment[es]=Crea una carpeta con fotogramas PNG a la frecuencia seleccionada
+Icon-Name=camera-photo-symbolic
+Exec=@media_tools_path@ extract-video-frames --value %p %F
+Prompt=Frames per second
+Prompt[es]=Fotogramas por segundo
+Prompt-Default=5
+Prompt-Mode=split
+Prompt-Display-Format=%s fps
+Group=Video
+Group[es]=Vídeo
+Section=extraction
+Position=40
+Selection=Single
+Mimetypes=video/*;
+Dependencies=python3;ffmpeg;

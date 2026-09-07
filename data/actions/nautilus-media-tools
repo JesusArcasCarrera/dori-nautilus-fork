@@ -4,8 +4,15 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+import functools
+import glob
+import json
+import math
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -13,11 +20,137 @@ import tempfile
 from typing import Callable, Sequence
 
 
-IS_SPANISH = os.environ.get("LANG", "").lower().startswith("es")
+def detect_spanish() -> bool:
+    for variable in ("LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG"):
+        value = os.environ.get(variable)
+        if value:
+            return value.split(":")[0].lower().startswith("es")
+    return False
+
+
+IS_SPANISH = detect_spanish()
+
+# Answer to the action's "Prompt" dialog, when the action declares one. Nautilus
+# passes it as $DORI_PROMPT and the action files also forward it as --value.
+PROMPT_VALUE: str | None = None
+
+CACHE_DIR = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "nautilus-media-tools"
+
+COMPOSITION_SIZE = (1920, 1080)
+COMPOSITION_PADDING = 8
+COMPOSITION_BACKGROUND = "#121212"
+COMPOSITION_FPS = 30
 
 
 def tr(english: str, spanish: str) -> str:
     return spanish if IS_SPANISH else english
+
+
+@dataclass
+class Outcome:
+    """Files created by an operation plus an optional notification message."""
+
+    paths: list[Path] = field(default_factory=list)
+    message: str | None = None
+
+
+def prompt_int(default: int, minimum: int = 0) -> int:
+    raw = (PROMPT_VALUE or "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as error:
+        raise ValueError(tr(
+            f"“{raw}” is not a whole number",
+            f"«{raw}» no es un número entero",
+        )) from error
+    if value < minimum:
+        raise ValueError(tr(
+            f"The value must be at least {minimum}",
+            f"El valor debe ser al menos {minimum}",
+        ))
+    return value
+
+
+def prompt_positive_decimal(default: str) -> str:
+    raw = default if PROMPT_VALUE is None else PROMPT_VALUE.strip()
+    if not raw:
+        raise ValueError(tr(
+            "The value cannot be empty",
+            "El valor no puede estar vacío",
+        ))
+    try:
+        value = Decimal(raw)
+    except InvalidOperation as error:
+        raise ValueError(tr(
+            f"“{raw}” is not a number",
+            f"«{raw}» no es un número",
+        )) from error
+    if not value.is_finite() or value <= 0:
+        raise ValueError(tr(
+            "The value must be greater than zero",
+            "El valor debe ser mayor que cero",
+        ))
+
+    normalized = format(value.normalize(), "f")
+    return normalized.rstrip("0").rstrip(".") if "." in normalized else normalized
+
+
+def copy_to_clipboard(text: str) -> bool:
+    for command in (["wl-copy"], ["xclip", "-selection", "clipboard"]):
+        executable = shutil.which(command[0])
+        if executable is None:
+            continue
+        subprocess.run(
+            [executable, *command[1:]],
+            input=text.encode(),
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return True
+    return False
+
+
+def write_text_file(target: Path, text: str) -> Path:
+    temporary = temporary_output(target)
+    try:
+        temporary.write_text(text, encoding="utf-8")
+        if target.exists():
+            target = available_path(target.parent, target.stem, target.suffix)
+        os.replace(temporary, target)
+        return target
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+@functools.cache
+def ffmpeg_encoders() -> frozenset[str]:
+    process = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-encoders"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return frozenset(
+        fields[1]
+        for line in process.stdout.splitlines()
+        if len(fields := line.split()) >= 2
+    )
+
+
+@functools.cache
+def tesseract_languages() -> str:
+    process = subprocess.run(
+        ["tesseract", "--list-langs"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    available = {line.strip() for line in process.stdout.splitlines()[1:] if line.strip()}
+    preferred = [language for language in ("spa", "eng") if language in available]
+    return "+".join(preferred or sorted(available) or ["eng"])
 
 
 def notify(title: str, message: str, *, error: bool = False) -> None:
@@ -46,6 +179,13 @@ def require_files(raw_paths: Sequence[str], minimum: int = 1) -> list[Path]:
     return paths
 
 
+def require_single_file(raw_paths: Sequence[str]) -> Path:
+    paths = require_files(raw_paths)
+    if len(paths) != 1:
+        raise ValueError(tr("Select exactly one file", "Selecciona exactamente un archivo"))
+    return paths[0]
+
+
 def available_path(directory: Path, stem: str, suffix: str) -> Path:
     candidate = directory / f"{stem}{suffix}"
     number = 2
@@ -66,16 +206,94 @@ def temporary_output(target: Path) -> Path:
     return Path(raw_path)
 
 
-def run_to_new_file(command: list[str], target: Path) -> Path:
+def publish_progress(current: float, total: float, remaining: float | None,
+                     detail: str = "") -> None:
+    destination = os.environ.get("DORI_PROGRESS_FILE")
+    if not destination or total <= 0:
+        return
+    safe_detail = detail.replace("\t", " ").replace("\r", " ").replace("\n", " ")
+    payload = (f"{current:.6f}\t{total:.6f}\t{remaining:.3f}\t{safe_detail}\n"
+               if remaining is not None
+               else f"{current:.6f}\t{total:.6f}\t\t{safe_detail}\n")
+    temporary = Path(f"{destination}.tmp-{os.getpid()}")
+    try:
+        temporary.write_text(payload, encoding="utf-8")
+        os.replace(temporary, destination)
+    except OSError:
+        temporary.unlink(missing_ok=True)
+
+
+def run_ffmpeg(command: list[str], duration: float, detail: str,
+               progress_start: float = 0, progress_total: float = 1) -> None:
+    expanded = [command[0], "-progress", "pipe:1", "-nostats", *command[1:]]
+    process = subprocess.Popen(
+        expanded,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    error_lines: list[str] = []
+    output_time = 0.0
+    speed = 0.0
+    progress_keys = {
+        "bitrate", "drop_frames", "dup_frames", "fps", "frame", "out_time",
+        "out_time_ms", "out_time_us", "progress", "speed", "stream_0_0_q",
+        "total_size",
+    }
+
+    assert process.stdout is not None
+    for line in process.stdout:
+        line = line.rstrip("\r\n")
+        key, separator, value = line.partition("=")
+        if not separator or key not in progress_keys:
+            if line:
+                error_lines.append(line)
+                error_lines = error_lines[-20:]
+            continue
+        if key == "out_time_us":
+            try:
+                output_time = max(0.0, float(value) / 1_000_000)
+            except ValueError:
+                pass
+        elif key == "speed":
+            match = re.fullmatch(r"\s*([0-9.]+)x\s*", value)
+            speed = float(match.group(1)) if match else 0.0
+        elif key == "progress":
+            fraction = min(output_time / duration, 1.0)
+            remaining = max(0.0, (duration - output_time) / speed) if speed > 0 else None
+            if progress_total > 1:
+                remaining = None
+            publish_progress(progress_start + fraction, progress_total, remaining, detail)
+
+    returncode = process.wait()
+    if returncode != 0:
+        raise subprocess.CalledProcessError(
+            returncode, expanded, stderr="\n".join(error_lines),
+        )
+
+
+def run_to_new_file(command: list[str], target: Path, *, duration: float | None = None,
+                    detail: str = "", progress_start: float = 0,
+                    progress_total: float = 1,
+                    validator: Callable[[Path], None] | None = None) -> Path:
     temporary = temporary_output(target)
     try:
         expanded = [str(temporary) if argument == "{output}" else argument for argument in command]
-        subprocess.run(
-            expanded,
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-        )
+        if Path(expanded[0]).name == "ffmpeg" and duration is not None and duration > 0:
+            run_ffmpeg(expanded, duration, detail, progress_start, progress_total)
+        else:
+            subprocess.run(
+                expanded,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+            )
+        if not temporary.exists():
+            raise ValueError(tr("The tool produced no output", "La herramienta no generó ningún archivo"))
+        if validator is not None:
+            validator(temporary)
         if target.exists():
             target = available_path(target.parent, target.stem, target.suffix)
         os.replace(temporary, target)
@@ -121,28 +339,754 @@ def transform_images(paths: Sequence[str], operation: str) -> list[Path]:
     return outputs
 
 
+def composition_geometry(count: int) -> tuple[int, int, int, int]:
+    width, height = COMPOSITION_SIZE
+    cell_width = (width - COMPOSITION_PADDING * (count + 1)) // count
+    cell_height = height - COMPOSITION_PADDING * 2
+
+    # Keep every placement and the final yuv420p frame on even coordinates.
+    cell_width -= cell_width % 2
+    cell_height -= cell_height % 2
+    if cell_width <= 0 or cell_height <= 0:
+        raise ValueError(tr(
+            "Too many files for the composition size",
+            "Hay demasiados archivos para el tamaño de la composición",
+        ))
+    return width, height, cell_width, cell_height
+
+
+def oriented_image_size(path: Path) -> tuple[int, int]:
+    process = subprocess.run(
+        [
+            "magick", f"{path}[0]", "-auto-orient",
+            "-format", "%w %h", "info:",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    try:
+        width, height = (int(value) for value in process.stdout.split())
+    except (TypeError, ValueError) as error:
+        raise ValueError(tr(
+            f"Could not determine the size of {path.name}",
+            f"No se pudo determinar el tamaño de {path.name}",
+        )) from error
+    if width <= 0 or height <= 0:
+        raise ValueError(tr(
+            f"Invalid image size in {path.name}",
+            f"Tamaño de imagen no válido en {path.name}",
+        ))
+    return width, height
+
+
+def image_composition_height(sizes: Sequence[tuple[int, int]]) -> int:
+    max_width, max_height = COMPOSITION_SIZE
+    available_width = max_width - COMPOSITION_PADDING * (len(sizes) + 1)
+    if available_width <= 0:
+        raise ValueError(tr(
+            "Too many files for the composition size",
+            "Hay demasiados archivos para el tamaño de la composición",
+        ))
+
+    # Use one common height so the images form compact columns without crop or
+    # letterboxing. Never enlarge the smallest source image.
+    height = min(max_height - COMPOSITION_PADDING * 2,
+                 *(source_height for _source_width, source_height in sizes))
+    total_aspect_ratio = sum(source_width / source_height
+                             for source_width, source_height in sizes)
+    height = min(height, math.floor(available_width / total_aspect_ratio))
+    while height > 0 and sum(math.ceil(source_width * height / source_height)
+                             for source_width, source_height in sizes) > available_width:
+        height -= 1
+    if height <= 0:
+        raise ValueError(tr(
+            "Too many files for the composition size",
+            "Hay demasiados archivos para el tamaño de la composición",
+        ))
+    return height
+
+
+def compose_images(paths: Sequence[str]) -> list[Path]:
+    inputs = require_files(paths, minimum=2)
+    sizes = [oriented_image_size(source) for source in inputs]
+    image_height = image_composition_height(sizes)
+    target = available_path(inputs[0].parent, f"{inputs[0].stem}_composicion", ".jpg")
+
+    command = ["magick"]
+    for source in inputs:
+        command.extend([
+            "(", f"{source}[0]", "-auto-orient",
+            "-resize", f"x{image_height}>",
+            "-background", COMPOSITION_BACKGROUND,
+            "-alpha", "remove", "-alpha", "off",
+            ")",
+        ])
+    command.extend([
+        "-background", COMPOSITION_BACKGROUND,
+        "+smush", str(COMPOSITION_PADDING),
+        "-bordercolor", COMPOSITION_BACKGROUND,
+        "-border", f"{COMPOSITION_PADDING}x{COMPOSITION_PADDING}",
+        "-quality", "95", "{output}",
+    ])
+    return [run_to_new_file(command, target)]
+
+
+def probe_video_duration(path: Path) -> float:
+    process = subprocess.run(
+        [
+            "ffprobe", "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=duration:format=duration",
+            "-of", "json", str(path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    payload = json.loads(process.stdout)
+    candidates = [payload.get("format", {}).get("duration")]
+    candidates.extend(stream.get("duration") for stream in payload.get("streams", []))
+
+    for value in candidates:
+        try:
+            duration = float(value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(duration) and duration > 0:
+            return duration
+
+    raise ValueError(tr(
+        f"Could not determine the duration of {path.name}",
+        f"No se pudo determinar la duración de {path.name}",
+    ))
+
+
+@dataclass(frozen=True)
+class VideoChapter:
+    start: Decimal
+    title: str
+
+
+@dataclass(frozen=True)
+class VideoInfo:
+    duration: Decimal
+    streams: tuple[tuple[tuple[str, str], ...], ...]
+    chapters: tuple[VideoChapter, ...]
+
+
+STREAM_SIGNATURE_FIELDS = (
+    "codec_type", "codec_name", "codec_tag_string", "profile", "level",
+    "width", "height", "pix_fmt", "sample_aspect_ratio", "field_order",
+    "sample_rate", "channels", "channel_layout", "time_base",
+)
+
+
+def decimal_seconds(value: object) -> Decimal | None:
+    try:
+        seconds = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    return seconds if seconds.is_finite() else None
+
+
+def probe_video_info(path: Path) -> VideoInfo:
+    process = subprocess.run(
+        [
+            "ffprobe", "-v", "error",
+            "-show_entries",
+            "format=duration:"
+            "stream=codec_type,codec_name,codec_tag_string,profile,level,width,height,"
+            "pix_fmt,sample_aspect_ratio,field_order,sample_rate,channels,channel_layout,"
+            "time_base,duration:chapter=start_time,end_time:chapter_tags=title",
+            "-of", "json", str(path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    payload = json.loads(process.stdout)
+    streams = payload.get("streams", [])
+    duration_candidates = [payload.get("format", {}).get("duration")]
+    duration_candidates.extend(stream.get("duration") for stream in streams)
+    duration = next(
+        (candidate for raw in duration_candidates
+         if (candidate := decimal_seconds(raw)) is not None and candidate > 0),
+        None,
+    )
+    if duration is None:
+        raise ValueError(tr(
+            f"Could not determine the duration of {path.name}",
+            f"No se pudo determinar la duración de {path.name}",
+        ))
+
+    signatures = tuple(
+        tuple(
+            (field_name, json.dumps(stream.get(field_name), ensure_ascii=False, sort_keys=True))
+            for field_name in STREAM_SIGNATURE_FIELDS
+        )
+        for stream in streams
+    )
+    if not streams or not any(stream.get("codec_type") == "video" for stream in streams):
+        raise ValueError(tr(
+            f"{path.name} has no video track",
+            f"{path.name} no tiene ninguna pista de vídeo",
+        ))
+
+    chapters: list[VideoChapter] = []
+    for index, chapter in enumerate(payload.get("chapters", []), start=1):
+        start = decimal_seconds(chapter.get("start_time"))
+        if start is None or start < 0 or start >= duration:
+            continue
+        title = str(chapter.get("tags", {}).get("title") or tr(
+            f"Chapter {index}", f"Capítulo {index}",
+        ))
+        chapters.append(VideoChapter(start, title))
+
+    return VideoInfo(duration, signatures, tuple(chapters))
+
+
+def clean_chapter_title(path: Path) -> str:
+    title = re.sub(r"[_-]+", " ", path.stem)
+    return re.sub(r"\s+", " ", title).strip() or path.stem
+
+
+def clean_metadata_title(title: str) -> str:
+    return re.sub(r"\s+", " ", title).strip()
+
+
+def ffmetadata_escape(value: str) -> str:
+    return (clean_metadata_title(value)
+            .replace("\\", "\\\\")
+            .replace("=", "\\=")
+            .replace(";", "\\;")
+            .replace("#", "\\#"))
+
+
+def ffconcat_quote(path: Path) -> str:
+    raw_path = str(path.resolve())
+    if "\n" in raw_path or "\r" in raw_path:
+        raise ValueError(tr(
+            f"The file name {path.name} contains a line break",
+            f"El nombre {path.name} contiene un salto de línea",
+        ))
+    return "'" + raw_path.replace("'", "'\\''") + "'"
+
+
+def microseconds(seconds: Decimal) -> int:
+    return int((seconds * 1_000_000).to_integral_value(rounding=ROUND_HALF_UP))
+
+
+def chapter_markers(inputs: Sequence[Path], infos: Sequence[VideoInfo]) -> list[tuple[int, str]]:
+    markers: list[tuple[int, str]] = []
+    offset = Decimal(0)
+    merge_tolerance = Decimal("0.001")
+
+    for source, info in zip(inputs, infos, strict=True):
+        source_title = clean_chapter_title(source)
+        internal = sorted(info.chapters, key=lambda chapter: chapter.start)
+        boundary_title = source_title
+        if internal and internal[0].start <= merge_tolerance:
+            boundary_title = f"{source_title} — {clean_metadata_title(internal[0].title)}"
+            internal = internal[1:]
+
+        markers.append((microseconds(offset), boundary_title))
+        for chapter in internal:
+            markers.append((
+                microseconds(offset + chapter.start),
+                f"{source_title} — {clean_metadata_title(chapter.title)}",
+            ))
+        offset += info.duration
+
+    # Some containers round chapter timestamps. Keep one navigation stop per
+    # microsecond, preferring the source boundary that was added first.
+    deduplicated: list[tuple[int, str]] = []
+    for marker in sorted(markers, key=lambda item: item[0]):
+        if deduplicated and marker[0] == deduplicated[-1][0]:
+            continue
+        deduplicated.append(marker)
+    return deduplicated
+
+
+def joined_video_target(inputs: Sequence[Path]) -> Path:
+    requested = (PROMPT_VALUE or "").strip()
+    if not requested:
+        requested = f"{inputs[0].stem}_unido"
+    if requested.lower().endswith(".mkv"):
+        requested = requested[:-4].rstrip()
+    if (not requested or requested in {".", ".."} or "/" in requested or
+            "\\" in requested or "\n" in requested or "\r" in requested):
+        raise ValueError(tr(
+            "Choose a file name without folders",
+            "Elige un nombre de archivo sin carpetas",
+        ))
+    return available_path(inputs[0].parent, requested, ".mkv")
+
+
+def write_concat_manifest(path: Path, inputs: Sequence[Path], infos: Sequence[VideoInfo]) -> None:
+    lines = ["ffconcat version 1.0"]
+    for source, info in zip(inputs, infos, strict=True):
+        lines.append(f"file {ffconcat_quote(source)}")
+        lines.append(f"duration {info.duration}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def write_chapter_metadata(path: Path, markers: Sequence[tuple[int, str]], total: Decimal) -> None:
+    total_microseconds = microseconds(total)
+    lines = [";FFMETADATA1"]
+    for index, (start, title) in enumerate(markers):
+        end = markers[index + 1][0] if index + 1 < len(markers) else total_microseconds
+        lines.extend([
+            "[CHAPTER]",
+            "TIMEBASE=1/1000000",
+            f"START={start}",
+            f"END={max(start + 1, end)}",
+            f"title={ffmetadata_escape(title)}",
+        ])
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def validate_joined_video(path: Path, markers: Sequence[tuple[int, str]]) -> None:
+    output = probe_video_info(path)
+    actual = [(microseconds(chapter.start), clean_metadata_title(chapter.title))
+              for chapter in output.chapters]
+    expected = [(start, clean_metadata_title(title)) for start, title in markers]
+    if len(actual) != len(expected) or any(
+        actual_title != expected_title or abs(actual_start - expected_start) > 2_000
+        for (actual_start, actual_title), (expected_start, expected_title)
+        in zip(actual, expected, strict=True)
+    ):
+        raise ValueError(tr(
+            "The resulting MKV did not preserve the expected chapters",
+            "El MKV resultante no conservó los capítulos esperados",
+        ))
+
+
+def join_videos(paths: Sequence[str]) -> list[Path]:
+    inputs = require_files(paths, minimum=2)
+    infos = [probe_video_info(source) for source in inputs]
+    reference_streams = infos[0].streams
+    for source, info in zip(inputs[1:], infos[1:], strict=True):
+        if info.streams != reference_streams:
+            raise ValueError(tr(
+                f"The tracks in {source.name} are not compatible with {inputs[0].name}. "
+                "Convert the videos to compatible MP4 first.",
+                f"Las pistas de {source.name} no son compatibles con {inputs[0].name}. "
+                "Convierte primero los vídeos a MP4 compatible.",
+            ))
+
+    target = joined_video_target(inputs)
+    total = sum((info.duration for info in infos), Decimal(0))
+    markers = chapter_markers(inputs, infos)
+
+    with tempfile.TemporaryDirectory(
+        dir=target.parent, prefix=f".{target.stem}-union-",
+    ) as raw_directory:
+        directory = Path(raw_directory)
+        manifest = directory / "inputs.ffconcat"
+        metadata = directory / "chapters.ffmetadata"
+        write_concat_manifest(manifest, inputs, infos)
+        write_chapter_metadata(metadata, markers, total)
+        command = [
+            "ffmpeg", "-nostdin", "-v", "error",
+            "-f", "concat", "-safe", "0", "-i", str(manifest),
+            "-f", "ffmetadata", "-i", str(metadata),
+            "-map", "0", "-map_metadata", "0", "-map_chapters", "1",
+            "-c", "copy", "{output}",
+        ]
+        return [run_to_new_file(
+            command, target, duration=float(total),
+            detail=tr("Joining videos", "Uniendo vídeos"),
+            validator=lambda output: validate_joined_video(output, markers),
+        )]
+
+
+def choose_composition_encoder() -> str:
+    return "libx264" if "libx264" in ffmpeg_encoders() else "mpeg4"
+
+
+def compose_videos(paths: Sequence[str]) -> list[Path]:
+    inputs = require_files(paths, minimum=2)
+    width, height, cell_width, cell_height = composition_geometry(len(inputs))
+    duration = max(probe_video_duration(source) for source in inputs)
+    target = available_path(inputs[0].parent, f"{inputs[0].stem}_composicion", ".mp4")
+    encoder = choose_composition_encoder()
+
+    command = ["ffmpeg", "-nostdin", "-v", "error"]
+    for source in inputs:
+        # Loop every input. The explicit output duration below stops the longest
+        # clip normally and extends every shorter clip without an intermediate
+        # re-encode.
+        command.extend(["-stream_loop", "-1", "-i", str(source)])
+
+    filters = [
+        f"color=c={COMPOSITION_BACKGROUND}:s={width}x{height}:r={COMPOSITION_FPS}:d={duration:.6f}[base]",
+    ]
+    for index in range(len(inputs)):
+        filters.append(
+            f"[{index}:v:0]fps={COMPOSITION_FPS},"
+            f"scale=w={cell_width}:h={cell_height}:force_original_aspect_ratio=decrease:"
+            "force_divisible_by=2:flags=lanczos,"
+            f"pad={cell_width}:{cell_height}:(ow-iw)/2:(oh-ih)/2:color={COMPOSITION_BACKGROUND},"
+            "setsar=1,settb=AVTB,setpts=PTS-STARTPTS"
+            f"[video{index}]"
+        )
+
+    previous = "base"
+    for index in range(len(inputs)):
+        x = COMPOSITION_PADDING + index * (cell_width + COMPOSITION_PADDING)
+        output_label = "composition" if index == len(inputs) - 1 else f"overlay{index}"
+        filters.append(
+            f"[{previous}][video{index}]overlay=x={x}:y={COMPOSITION_PADDING}:"
+            f"eof_action=pass:shortest=0[{output_label}]"
+        )
+        previous = output_label
+
+    command.extend([
+        "-filter_complex", ";".join(filters),
+        "-map", "[composition]", "-an",
+        "-t", f"{duration:.6f}",
+        "-r", str(COMPOSITION_FPS), "-fps_mode", "cfr",
+        "-c:v", encoder, "-pix_fmt", "yuv420p",
+    ])
+    if encoder == "libx264":
+        command.extend(["-crf", "18", "-preset", "medium"])
+    else:
+        command.extend(["-q:v", "2"])
+    command.extend(["-movflags", "+faststart", "{output}"])
+    return [run_to_new_file(
+        command, target, duration=duration,
+        detail=tr("Composing videos", "Componiendo vídeos"),
+    )]
+
+
 def videos_to_mkv(paths: Sequence[str]) -> list[Path]:
     inputs = require_files(paths)
     outputs: list[Path] = []
 
-    for source in inputs:
+    for index, source in enumerate(inputs):
         target = available_path(source.parent, f"{source.stem}_convertido", ".mkv")
         command = [
             "ffmpeg", "-nostdin", "-v", "error", "-i", str(source),
             "-map", "0", "-map_metadata", "0", "-c", "copy", "{output}",
+        ]
+        outputs.append(run_to_new_file(
+            command, target, duration=probe_video_duration(source),
+            detail=tr("Remuxing video", "Remultiplexando vídeo"),
+            progress_start=index, progress_total=len(inputs),
+        ))
+
+    return outputs
+
+
+def extract_video_frames(paths: Sequence[str]) -> list[Path]:
+    source = require_single_file(paths)
+    frames_per_second = prompt_positive_decimal("5")
+    duration = probe_video_duration(source)
+    target = available_path(source.parent, f"{source.stem}_fotogramas", "")
+    temporary = Path(tempfile.mkdtemp(
+        dir=source.parent,
+        prefix=f".{source.stem}-fotogramas-",
+    ))
+
+    try:
+        run_ffmpeg(
+            [
+                "ffmpeg", "-nostdin", "-v", "error", "-i", str(source),
+                "-vf", f"fps={frames_per_second}", "-fps_mode", "vfr",
+                str(temporary / "fotograma_%06d.png"),
+            ],
+            duration,
+            tr("Extracting frames", "Extrayendo fotogramas"),
+        )
+        if next(temporary.iterdir(), None) is None:
+            raise subprocess.CalledProcessError(1, "ffmpeg")
+        if target.exists():
+            target = available_path(target.parent, target.name, "")
+        temporary.rename(target)
+        return [target]
+    finally:
+        if temporary.exists():
+            shutil.rmtree(temporary)
+
+
+def loop_video_x10(paths: Sequence[str]) -> list[Path]:
+    source = require_single_file(paths)
+    target = available_path(source.parent, f"{source.stem}_bucle-x10", ".mkv")
+    command = [
+        "ffmpeg", "-nostdin", "-v", "error", "-stream_loop", "9",
+        "-i", str(source), "-map", "0", "-map_metadata", "0",
+        "-c", "copy", "{output}",
+    ]
+    return [run_to_new_file(
+        command, target, duration=probe_video_duration(source) * 10,
+        detail=tr("Creating loop", "Creando bucle"),
+    )]
+
+
+def extract_frame(paths: Sequence[str]) -> list[Path]:
+    """Save one frame (default: the 100th) of a video as PNG."""
+    source = require_single_file(paths)
+    frame = prompt_int(default=100, minimum=0)
+    target = available_path(source.parent, f"{source.stem}_fotograma-{frame}", ".png")
+    command = [
+        "ffmpeg", "-nostdin", "-v", "error", "-i", str(source),
+        "-vf", f"select=gte(n\\,{frame})", "-frames:v", "1",
+        "-fps_mode", "passthrough", "{output}",
+    ]
+    return [run_to_new_file(command, target)]
+
+
+def contact_sheet(paths: Sequence[str]) -> list[Path]:
+    """Tile 20 evenly spaced frames into a single JPEG overview."""
+    source = require_single_file(paths)
+    columns, rows = 5, 4
+    duration = probe_video_duration(source)
+    interval = duration / (columns * rows)
+    target = available_path(source.parent, f"{source.stem}_hoja-contactos", ".jpg")
+    command = [
+        "ffmpeg", "-nostdin", "-v", "error", "-i", str(source),
+        "-vf", (
+            f"fps=1/{interval:.6f},scale=384:-2:flags=lanczos,"
+            f"tile={columns}x{rows}:padding=4:margin=4:color={COMPOSITION_BACKGROUND}"
+        ),
+        "-frames:v", "1", "-q:v", "3", "{output}",
+    ]
+    return [run_to_new_file(
+        command, target, duration=duration,
+        detail=tr("Creating contact sheet", "Creando hoja de contactos"),
+    )]
+
+
+def images_to_pdf(paths: Sequence[str]) -> list[Path]:
+    """One page per selected image, in the visible order."""
+    inputs = require_files(paths)
+    stem = inputs[0].stem if len(inputs) == 1 else f"{inputs[0].stem}_documento"
+    target = available_path(inputs[0].parent, stem, ".pdf")
+    command = ["magick", *(str(path) for path in inputs), "-auto-orient", "{output}"]
+    return [run_to_new_file(command, target)]
+
+
+def office_to_pdf(paths: Sequence[str]) -> list[Path]:
+    """Convert office documents with a headless, isolated LibreOffice profile."""
+    inputs = require_files(paths)
+    profile = CACHE_DIR / "soffice-profile"
+    profile.mkdir(parents=True, exist_ok=True)
+    outputs: list[Path] = []
+
+    with tempfile.TemporaryDirectory(dir=inputs[0].parent, prefix=".pdf-") as raw_directory:
+        directory = Path(raw_directory)
+        subprocess.run(
+            [
+                "soffice", f"-env:UserInstallation={profile.as_uri()}",
+                "--headless", "--norestore", "--convert-to", "pdf",
+                "--outdir", str(directory), *(str(path) for path in inputs),
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+        )
+        for source in inputs:
+            produced = directory / f"{source.stem}.pdf"
+            if not produced.is_file():
+                raise ValueError(tr(
+                    f"LibreOffice could not convert {source.name}",
+                    f"LibreOffice no pudo convertir {source.name}",
+                ))
+            target = available_path(source.parent, source.stem, ".pdf")
+            os.replace(produced, target)
+            outputs.append(target)
+
+    return outputs
+
+
+def ocr_pdf(paths: Sequence[str]) -> list[Path]:
+    """Add a searchable text layer to scanned PDFs (pages with text are kept)."""
+    inputs = require_files(paths)
+    outputs: list[Path] = []
+
+    for source in inputs:
+        target = available_path(source.parent, f"{source.stem}_ocr", ".pdf")
+        command = [
+            "ocrmypdf", "--quiet", "--skip-text", "-l", tesseract_languages(),
+            str(source), "{output}",
         ]
         outputs.append(run_to_new_file(command, target))
 
     return outputs
 
 
-OPERATIONS: dict[str, Callable[[Sequence[str]], list[Path]]] = {
+def ocr_image(paths: Sequence[str]) -> Outcome:
+    """Recognise text in images: one .txt per image, all text to the clipboard."""
+    inputs = require_files(paths)
+    outputs: list[Path] = []
+    texts: list[str] = []
+
+    for source in inputs:
+        process = subprocess.run(
+            ["tesseract", str(source), "stdout", "-l", tesseract_languages()],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        text = process.stdout.strip()
+        texts.append(text)
+        outputs.append(write_text_file(
+            available_path(source.parent, f"{source.stem}_texto", ".txt"),
+            text + "\n",
+        ))
+
+    copied = copy_to_clipboard("\n\n".join(texts) + "\n")
+    message = tr(
+        f"Created {outputs[0].name}" if len(outputs) == 1 else f"Created {len(outputs)} text files",
+        f"Se ha creado {outputs[0].name}" if len(outputs) == 1 else f"Se han creado {len(outputs)} archivos de texto",
+    )
+    if copied:
+        message += tr(". Text copied to the clipboard.", ". Texto copiado al portapapeles.")
+    return Outcome(outputs, message)
+
+
+def h264_encoders() -> list[str]:
+    encoders = ffmpeg_encoders()
+    return [name for name in ("h264_nvenc", "libx264", "mpeg4") if name in encoders]
+
+
+def video_to_mp4(paths: Sequence[str]) -> list[Path]:
+    """Re-encode to a widely compatible MP4 (H.264 + AAC), GPU first."""
+    inputs = require_files(paths)
+    outputs: list[Path] = []
+
+    for index, source in enumerate(inputs):
+        target = available_path(source.parent, f"{source.stem}_compatible", ".mp4")
+        duration = probe_video_duration(source)
+        last_error: Exception | None = None
+
+        for encoder in h264_encoders():
+            command = [
+                "ffmpeg", "-nostdin", "-v", "error", "-i", str(source),
+                "-map", "0:v:0", "-map", "0:a:0?", "-map_metadata", "0",
+                "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+                "-c:v", encoder, "-pix_fmt", "yuv420p",
+            ]
+            if encoder == "h264_nvenc":
+                command += ["-preset", "p5", "-rc", "vbr", "-cq", "23", "-b:v", "0"]
+            elif encoder == "libx264":
+                command += ["-crf", "22", "-preset", "medium"]
+            else:
+                command += ["-q:v", "3"]
+            command += ["-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", "{output}"]
+            try:
+                outputs.append(run_to_new_file(
+                    command, target, duration=duration,
+                    detail=tr("Encoding compatible MP4", "Codificando MP4 compatible"),
+                    progress_start=index, progress_total=len(inputs),
+                ))
+                break
+            except subprocess.CalledProcessError as error:
+                # Typically the GPU encoder is listed but unusable; fall back.
+                last_error = error
+        else:
+            raise last_error or ValueError(tr("No H.264 encoder available", "No hay ningún codificador H.264 disponible"))
+
+    return outputs
+
+
+def video_to_gif(paths: Sequence[str]) -> list[Path]:
+    """Two-pass palette GIF at 12 fps and 480 px wide."""
+    source = require_single_file(paths)
+    target = available_path(source.parent, source.stem, ".gif")
+    filters = (
+        "fps=12,scale=480:-2:flags=lanczos,split[a][b];"
+        "[a]palettegen=stats_mode=diff[p];"
+        "[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle"
+    )
+    command = [
+        "ffmpeg", "-nostdin", "-v", "error", "-i", str(source),
+        "-vf", filters, "-loop", "0", "{output}",
+    ]
+    return [run_to_new_file(
+        command, target, duration=probe_video_duration(source),
+        detail=tr("Creating GIF", "Creando GIF"),
+    )]
+
+
+def strip_image_metadata(paths: Sequence[str]) -> list[Path]:
+    """Copy without EXIF/XMP/IPTC, keeping orientation and colour profile."""
+    inputs = require_files(paths)
+    outputs: list[Path] = []
+
+    for source in inputs:
+        target = available_path(source.parent, f"{source.stem}_sin-metadatos", source.suffix)
+        command = [
+            "exiftool", "-quiet", "-all=", "-tagsFromFile", "@",
+            "-Orientation", "-ICC_Profile", "-o", "{output}", str(source),
+        ]
+        outputs.append(run_to_new_file(command, target))
+
+    return outputs
+
+
+def transcribe(paths: Sequence[str]) -> Outcome:
+    """Delegate to the user's `subs` CLI (faster-whisper + NLLB): SRT next to the media."""
+    inputs = require_files(paths)
+    subprocess.run(
+        ["subs", *(str(path) for path in inputs)],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    outputs = [
+        Path(match)
+        for source in inputs
+        for match in sorted(glob.glob(str(source.parent / f"{glob.escape(source.stem)}.*.srt")))
+    ]
+    if not outputs:
+        raise ValueError(tr("subs produced no subtitles", "subs no generó subtítulos"))
+    return Outcome(outputs, tr(
+        f"Subtitles ready: {', '.join(path.name for path in outputs)}",
+        f"Subtítulos listos: {', '.join(path.name for path in outputs)}",
+    ))
+
+
+def narrate(paths: Sequence[str]) -> list[Path]:
+    """Delegate to the user's `voz leer` (local TTS): narrate a PDF/TXT to MP3."""
+    source = require_single_file(paths)
+    # `voz leer` is resumable and writes its own checkpoints keyed on the output
+    # path, so it receives the final name directly instead of a temporary one.
+    target = available_path(source.parent, f"{source.stem}_narracion", ".mp3")
+    subprocess.run(
+        ["voz", "leer", str(source), str(target)],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+    )
+    if not target.is_file():
+        raise ValueError(tr("voz produced no audio", "voz no generó ningún audio"))
+    return [target]
+
+
+OPERATIONS: dict[str, Callable[[Sequence[str]], list[Path] | Outcome]] = {
     "combine-pdf": combine_pdf,
     "rotate-image-right": lambda paths: transform_images(paths, "rotate-image-right"),
     "rotate-image-left": lambda paths: transform_images(paths, "rotate-image-left"),
     "convert-image-png": lambda paths: transform_images(paths, "convert-image-png"),
     "convert-image-jpeg": lambda paths: transform_images(paths, "convert-image-jpeg"),
+    "compose-images": compose_images,
+    "join-videos": join_videos,
     "video-to-mkv": videos_to_mkv,
+    "compose-videos": compose_videos,
+    "extract-video-frames": extract_video_frames,
+    "loop-video-x10": loop_video_x10,
+    "extract-frame": extract_frame,
+    "contact-sheet": contact_sheet,
+    "images-to-pdf": images_to_pdf,
+    "office-to-pdf": office_to_pdf,
+    "ocr-pdf": ocr_pdf,
+    "ocr-image": ocr_image,
+    "video-to-mp4": video_to_mp4,
+    "video-to-gif": video_to_gif,
+    "strip-image-metadata": strip_image_metadata,
+    "transcribe": transcribe,
+    "narrate": narrate,
 }
 
 
@@ -154,12 +1098,20 @@ def parse_arguments() -> argparse.Namespace:
         )
     )
     parser.add_argument("operation", choices=OPERATIONS)
+    parser.add_argument(
+        "--value",
+        default=os.environ.get("DORI_PROMPT"),
+        help=tr("answer to the action's prompt", "respuesta al diálogo de la acción"),
+    )
     parser.add_argument("files", nargs="+", help=tr("input files", "archivos de entrada"))
     return parser.parse_args()
 
 
 def main() -> int:
+    global PROMPT_VALUE
+
     arguments = parse_arguments()
+    PROMPT_VALUE = arguments.value
     operation = OPERATIONS[arguments.operation]
     notify(
         tr("Media operation started", "Operación multimedia iniciada"),
@@ -167,20 +1119,22 @@ def main() -> int:
     )
 
     try:
-        outputs = operation(arguments.files)
-    except (OSError, ValueError, subprocess.SubprocessError):
-        notify(
-            tr("The operation could not be completed", "No se pudo completar la operación"),
-            tr("The original files have not been modified.", "Los archivos originales no se han modificado."),
-            error=True,
+        result = operation(arguments.files)
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        detail = str(error) if isinstance(error, ValueError) else tr(
+            "The original files have not been modified.",
+            "Los archivos originales no se han modificado.",
         )
+        notify(tr("The operation could not be completed", "No se pudo completar la operación"), detail, error=True)
         return 1
 
-    first_name = outputs[0].name
-    if len(outputs) == 1:
-        message = tr(f"Created {first_name}", f"Se ha creado {first_name}")
+    outcome = result if isinstance(result, Outcome) else Outcome(result)
+    if outcome.message is not None:
+        message = outcome.message
+    elif len(outcome.paths) == 1:
+        message = tr(f"Created {outcome.paths[0].name}", f"Se ha creado {outcome.paths[0].name}")
     else:
-        message = tr(f"Created {len(outputs)} files", f"Se han creado {len(outputs)} archivos")
+        message = tr(f"Created {len(outcome.paths)} files", f"Se han creado {len(outcome.paths)} archivos")
     notify(tr("Operation completed", "Operación completada"), message)
     return 0
 

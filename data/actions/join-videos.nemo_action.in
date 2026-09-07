@@ -1,0 +1,20 @@
+[Nemo Action]
+Name=Join videos
+Name[es]=Unir vídeos
+Comment=Concatenate the selected videos into an MKV with chapters, without re-encoding
+Comment[es]=Concatena los vídeos seleccionados en un MKV con capítulos, sin recodificar
+Icon-Name=video-x-generic-symbolic
+Exec=@media_tools_path@ join-videos --value %p %F
+Prompt=Name of the resulting MKV
+Prompt[es]=Nombre del MKV resultante
+Prompt-Default=Joined videos
+Prompt-Default[es]=Vídeos unidos
+Prompt-Mode=split
+Prompt-Display-Format=%s
+Group=Video
+Group[es]=Vídeo
+Section=combine
+Position=60
+Selection=Multiple
+Mimetypes=video/*;
+Dependencies=python3;ffmpeg;ffprobe;

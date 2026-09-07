@@ -1,0 +1,14 @@
+[Nemo Action]
+Name=Create loop (×10)
+Name[es]=Crear bucle (×10)
+Comment=Create an MKV with ten consecutive copies without re-encoding
+Comment[es]=Crea un MKV con diez copias consecutivas sin recodificar
+Icon-Name=media-playlist-repeat-symbolic
+Exec=@media_tools_path@ loop-video-x10 %F
+Group=Video
+Group[es]=Vídeo
+Section=editing
+Position=34
+Selection=Single
+Mimetypes=video/*;
+Dependencies=python3;ffmpeg;

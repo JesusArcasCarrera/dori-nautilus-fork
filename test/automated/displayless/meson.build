@@ -1,4 +1,17 @@
 tracker_sandbox = find_program('localsearch')
+python = import('python').find_installation()
+
+test(
+  'test-media-tools',
+  python,
+  args: [
+    files('test-media-tools.py'),
+    join_paths(meson.project_source_root(), 'data/actions/nautilus-media-tools'),
+    join_paths(meson.project_source_root(), 'data/actions'),
+  ],
+  timeout: 120,
+  suite: ['displayless'],
+)
 
 tests = {
   'test-bookmarks': {},

@@ -1,0 +1,14 @@
+[Nemo Action]
+Name=Convert to PDF
+Name[es]=Convertir a PDF
+Comment=Create a PDF with one page per selected image, in the order they were selected
+Comment[es]=Crea un PDF con una página por imagen seleccionada, en el orden en que se seleccionaron
+Icon-Name=x-office-document-symbolic
+Exec=@media_tools_path@ images-to-pdf %F
+Group=Image
+Group[es]=Imagen
+Section=conversion
+Position=45
+Selection=Any
+Mimetypes=image/*;
+Dependencies=python3;magick;

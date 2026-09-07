@@ -7,6 +7,7 @@ Icon-Name=object-rotate-left-symbolic
 Exec=@media_tools_path@ rotate-image-left %F
 Group=Image
 Group[es]=Imagen
+Section=editing
 Position=20
 Selection=Any
 Mimetypes=image/*;

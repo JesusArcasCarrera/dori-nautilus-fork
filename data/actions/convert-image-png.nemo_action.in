@@ -7,6 +7,7 @@ Icon-Name=image-x-generic-symbolic
 Exec=@media_tools_path@ convert-image-png %F
 Group=Image
 Group[es]=Imagen
+Section=conversion
 Position=30
 Selection=Any
 Mimetypes=image/*;

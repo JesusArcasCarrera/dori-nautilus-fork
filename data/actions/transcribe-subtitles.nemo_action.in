@@ -1,0 +1,14 @@
+[Nemo Action]
+Name=Transcribe to subtitles (subs)
+Name[es]=Transcribir a subtítulos (subs)
+Comment=Generate SRT subtitles locally with the subs command (faster-whisper on GPU, Spanish translation)
+Comment[es]=Genera subtítulos SRT en local con el comando subs (faster-whisper en GPU, traducción al español)
+Icon-Name=media-view-subtitles-symbolic
+Exec=@media_tools_path@ transcribe %F
+Group=Video
+Group[es]=Vídeo
+Section=utilities
+Position=72
+Selection=Any
+Mimetypes=video/*;audio/*;
+Dependencies=python3;subs;

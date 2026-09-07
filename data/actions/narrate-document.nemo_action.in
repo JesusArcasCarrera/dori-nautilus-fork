@@ -1,0 +1,13 @@
+[Nemo Action]
+Name=Narrate to MP3 (voz)
+Name[es]=Narrar a MP3 (voz)
+Comment=Read the document aloud into an MP3 with the local voz TTS
+Comment[es]=Lee el documento y genera un MP3 con el TTS local voz
+Icon-Name=audio-speakers-symbolic
+Exec=@media_tools_path@ narrate %F
+Group=Documents
+Group[es]=Documentos
+Position=20
+Selection=Single
+Mimetypes=application/pdf;text/plain;text/markdown;
+Dependencies=python3;voz;

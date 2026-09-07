@@ -1,11 +1,12 @@
 [Nemo Action]
 Name=Combine PDFs
 Name[es]=Combinar PDFs
-Comment=Combine the selected PDFs in their visible order
-Comment[es]=Combina los PDF seleccionados en su orden visible
+Comment=Combine the selected PDFs in the order they were selected
+Comment[es]=Combina los PDF seleccionados en el orden en que se seleccionaron
 Icon-Name=x-office-document-symbolic
 Exec=@media_tools_path@ combine-pdf %F
 Group=PDF
+Section=editing
 Position=10
 Selection=Multiple
 Mimetypes=application/pdf;

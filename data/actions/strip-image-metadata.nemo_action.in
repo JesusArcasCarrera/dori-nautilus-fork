@@ -1,0 +1,14 @@
+[Nemo Action]
+Name=Copy without metadata
+Name[es]=Copiar sin metadatos
+Comment=Create a copy without EXIF, GPS and other metadata, keeping orientation and colour profile
+Comment[es]=Crea una copia sin EXIF, GPS ni otros metadatos, conservando orientación y perfil de color
+Icon-Name=security-medium-symbolic
+Exec=@media_tools_path@ strip-image-metadata %F
+Group=Image
+Group[es]=Imagen
+Section=utilities
+Position=70
+Selection=Any
+Mimetypes=image/*;
+Dependencies=python3;exiftool;

@@ -1,0 +1,14 @@
+[Nemo Action]
+Name=Create video composition
+Name[es]=Crear composición de vídeos
+Comment=Arrange the selected videos in columns, repeating shorter clips
+Comment[es]=Distribuye los vídeos en columnas y repite los clips más cortos
+Icon-Name=video-x-generic-symbolic
+Exec=@media_tools_path@ compose-videos %F
+Group=Video
+Group[es]=Vídeo
+Section=combine
+Position=62
+Selection=Multiple
+Mimetypes=video/*;
+Dependencies=python3;ffmpeg;ffprobe;

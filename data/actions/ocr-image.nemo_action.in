@@ -1,0 +1,14 @@
+[Nemo Action]
+Name=Recognise text (OCR)
+Name[es]=Reconocer texto (OCR)
+Comment=Extract the text of the image into a .txt file and the clipboard
+Comment[es]=Extrae el texto de la imagen a un archivo .txt y al portapapeles
+Icon-Name=edit-find-symbolic
+Exec=@media_tools_path@ ocr-image %F
+Group=Image
+Group[es]=Imagen
+Section=recognition
+Position=60
+Selection=Any
+Mimetypes=image/*;
+Dependencies=python3;tesseract;

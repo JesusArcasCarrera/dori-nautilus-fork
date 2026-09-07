@@ -1,0 +1,14 @@
+[Nemo Action]
+Name=Convert to compatible MP4
+Name[es]=Convertir a MP4 compatible
+Comment=Re-encode to H.264 and AAC for messaging apps and the web (GPU when available)
+Comment[es]=Recodifica a H.264 y AAC para mensajería y web (con GPU si está disponible)
+Icon-Name=video-x-generic-symbolic
+Exec=@media_tools_path@ video-to-mp4 %F
+Group=Video
+Group[es]=Vídeo
+Section=conversion
+Position=12
+Selection=Any
+Mimetypes=video/*;
+Dependencies=python3;ffmpeg;

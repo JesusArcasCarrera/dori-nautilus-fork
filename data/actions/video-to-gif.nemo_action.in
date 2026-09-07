@@ -1,0 +1,14 @@
+[Nemo Action]
+Name=Convert to GIF
+Name[es]=Convertir a GIF
+Comment=Create an animated GIF (480 px wide, 12 fps, optimised palette)
+Comment[es]=Crea un GIF animado (480 px de ancho, 12 fps, paleta optimizada)
+Icon-Name=image-x-generic-symbolic
+Exec=@media_tools_path@ video-to-gif %F
+Group=Video
+Group[es]=Vídeo
+Section=creation
+Position=46
+Selection=Single
+Mimetypes=video/*;
+Dependencies=python3;ffmpeg;

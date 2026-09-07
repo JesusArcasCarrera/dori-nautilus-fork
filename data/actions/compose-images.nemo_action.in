@@ -1,0 +1,14 @@
+[Nemo Action]
+Name=Create image composition
+Name[es]=Crear composición de imágenes
+Comment=Arrange the selected images in columns, in selection order, inside a single image
+Comment[es]=Distribuye las imágenes seleccionadas en columnas, en orden de selección, dentro de una sola imagen
+Icon-Name=image-x-generic-symbolic
+Exec=@media_tools_path@ compose-images %F
+Group=Image
+Group[es]=Imagen
+Section=creation
+Position=52
+Selection=Multiple
+Mimetypes=image/*;
+Dependencies=python3;magick;

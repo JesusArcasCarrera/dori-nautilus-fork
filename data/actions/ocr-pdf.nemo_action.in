@@ -1,0 +1,13 @@
+[Nemo Action]
+Name=Make searchable (OCR)
+Name[es]=Hacer buscable (OCR)
+Comment=Add a text layer to scanned PDFs with ocrmypdf; pages that already have text are kept
+Comment[es]=Añade una capa de texto a los PDF escaneados con ocrmypdf; las páginas con texto se conservan
+Icon-Name=edit-find-symbolic
+Exec=@media_tools_path@ ocr-pdf %F
+Group=PDF
+Section=recognition
+Position=20
+Selection=Any
+Mimetypes=application/pdf;
+Dependencies=python3;ocrmypdf;tesseract;

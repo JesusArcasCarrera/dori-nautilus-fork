@@ -1,0 +1,14 @@
+[Nemo Action]
+Name=Create contact sheet
+Name[es]=Crear hoja de contactos
+Comment=Tile 20 evenly spaced frames into one JPEG overview
+Comment[es]=Compone 20 fotogramas equidistantes en una sola imagen JPEG
+Icon-Name=view-grid-symbolic
+Exec=@media_tools_path@ contact-sheet %F
+Group=Video
+Group[es]=Vídeo
+Section=creation
+Position=44
+Selection=Single
+Mimetypes=video/*;
+Dependencies=python3;ffmpeg;ffprobe;

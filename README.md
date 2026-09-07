@@ -161,18 +161,48 @@ Icon-Name=visual-studio-code
 The fork ships type-aware submenus for common operations that should not
 require opening a separate editor:
 
-  - **PDF → Combine PDFs** joins two or more selected PDFs with `qpdf`. GTK
-    does not retain the chronological order of selection clicks, so pages are
-    combined in the stable visible order of the current view.
-  - **Image** can rotate copies 90 degrees left/right or convert copies to PNG
-    and JPEG with ImageMagick.
-  - **Video → Convert to MKV without re-encoding** remuxes every selected video
-    with FFmpeg, preserving its streams and quality.
+  - **PDF → Combine PDFs** joins two or more selected PDFs with `qpdf`, in
+    the order the files were selected. GTK's selection model forgets click
+    order, so the view tracks it itself (`selection_order`) and every custom
+    action receives `%F` in that order; a range or Select All adds its files
+    in visible order.
+  - **Image** can rotate copies 90 degrees left/right, convert copies to PNG
+    and JPEG, or arrange two or more selected images in horizontal columns
+    inside a 1920×1080 JPEG with ImageMagick.
+  - **Video** can remux to MKV, join compatible videos in selection order into
+    a chaptered MKV without re-encoding, re-encode to a compatible MP4 (H.264
+    + AAC, NVENC when available), extract five PNG frames per second, save a
+    single frame (the 100th by default, asked through `Prompt`), build a 5×4
+    contact sheet, create an animated GIF, create a ten-play MKV loop without
+    re-encoding, or arrange two or more selected videos in horizontal columns
+    inside a 1920×1080 MP4. Video compositions normalize dimensions, aspect
+    ratio, timestamps and frame rate, and repeat shorter clips until the
+    longest one ends. Frame extraction, GIF and looping require exactly one
+    selected video.
+  - **Image** also converts one or more images to a PDF (one page each, in
+    selection order), recognises text with tesseract into a `.txt` and the
+    clipboard, and copies images without EXIF/GPS metadata (exiftool).
+  - **PDF → Make searchable (OCR)** adds a text layer with `ocrmypdf`
+    (`pip install ocrmypdf`; the entry hides until it is installed).
+  - **Documents** converts office files (ODF, OOXML, legacy MS Office, RTF) to
+    PDF with headless LibreOffice.
+
+The fork deliberately does **not** reimplement heavy processing. Where a local
+CLI already exists it is simply wired into the menu:
+
+  - **Video → Transcribe to subtitles (subs)** runs the `subs` command
+    (faster-whisper on GPU plus NLLB translation) and reports the SRT files it
+    left next to the media.
+  - **Documents → Narrate to MP3 (voz)** runs `voz leer` (the local TTS) on a
+    PDF, TXT or Markdown file.
+
+Both entries appear only when the corresponding command is on `$PATH`.
 
 Every operation writes to a temporary file in the destination folder and
 renames it only after success. Originals are never overwritten; existing
 output names receive a numeric suffix. An action is hidden automatically when
-its dependency (`qpdf`, `magick` or `ffmpeg`) is unavailable.
+its dependency (`qpdf`, `magick`, `ffmpeg`, `tesseract`, `exiftool`,
+`soffice`, `ocrmypdf`, `subs`, `voz`) is unavailable.
 
 ### Configurable type-to-action behaviour
 
