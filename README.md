@@ -204,6 +204,12 @@ output names receive a numeric suffix. An action is hidden automatically when
 its dependency (`qpdf`, `magick`, `ffmpeg`, `tesseract`, `exiftool`,
 `soffice`, `ocrmypdf`, `subs`, `voz`) is unavailable.
 
+For a single local video, **Properties** reads the container asynchronously
+with `ffprobe` and lists every audio and subtitle track, including language,
+track title, codec, channel layout and default/forced disposition when present.
+The dialog remains responsive while this information loads, and the section is
+simply omitted when `ffprobe` is unavailable.
+
 ### Configurable type-to-action behaviour
 
 Upstream forces typing in a folder to start a recursive search. This fork

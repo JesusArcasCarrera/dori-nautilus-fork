@@ -471,6 +471,85 @@ template $NautilusPropertiesWidget: Adw.Bin {
               }
             }
 
+            Adw.PreferencesGroup media_group {
+              visible: false;
+              title: _("Multimedia");
+
+              Adw.ActionRow media_loading_row {
+                title: _("Tracks");
+                subtitle: _("Reading track information…");
+                selectable: false;
+
+                [suffix]
+                Adw.Spinner media_spinner {
+                  valign: center;
+                }
+              }
+
+              Adw.ActionRow audio_tracks_row {
+                visible: false;
+                selectable: false;
+                subtitle-selectable: true;
+                subtitle-lines: 6;
+                use-markup: false;
+
+                styles [
+                  "property",
+                ]
+              }
+
+              Adw.ActionRow subtitle_tracks_row {
+                visible: false;
+                selectable: false;
+                subtitle-selectable: true;
+                subtitle-lines: 6;
+                use-markup: false;
+
+                styles [
+                  "property",
+                ]
+              }
+            }
+
+            Adw.PreferencesGroup checksum_group {
+              visible: false;
+
+              Adw.ActionRow sha256_row {
+                title: _("SHA-256");
+                subtitle: _("Click to calculate");
+                activatable: true;
+                selectable: false;
+                subtitle-selectable: true;
+                subtitle-lines: 2;
+                use-markup: false;
+                activated => $calculate_sha256() swapped;
+
+                styles [
+                  "property",
+                  "numeric",
+                ]
+
+                [suffix]
+                Adw.Spinner sha256_spinner {
+                  visible: false;
+                  valign: center;
+                }
+
+                [suffix]
+                Button copy_sha256_button {
+                  tooltip-text: _("Copy");
+                  icon-name: "edit-copy-symbolic";
+                  valign: center;
+                  visible: false;
+                  clicked => $copy_sha256() swapped;
+
+                  styles [
+                    "flat",
+                  ]
+                }
+              }
+            }
+
             Adw.PreferencesGroup {
               Adw.ActionRow permissions_navigation_row {
                 activatable: true;

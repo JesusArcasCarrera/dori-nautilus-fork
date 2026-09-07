@@ -27,8 +27,12 @@
 #include <glib/gi18n.h>
 #include <gio/gunixmounts.h>
 #include <nautilus-extension.h>
+#include <json-glib/json-glib.h>
 #include <string.h>
 #include <sys/stat.h>
+
+#define GNOME_DESKTOP_USE_UNSTABLE_API
+#include <libgnome-desktop/gnome-languages.h>
 
 #include "nautilus-application.h"
 #include "nautilus-dbus-launcher.h"
@@ -126,6 +130,19 @@ struct _NautilusPropertiesWidget
     GtkWidget *modified_row;
     GtkWidget *created_row;
     GtkWidget *accessed_row;
+
+    GtkWidget *media_group;
+    GtkWidget *media_loading_row;
+    GtkWidget *media_spinner;
+    GtkWidget *audio_tracks_row;
+    GtkWidget *subtitle_tracks_row;
+    GCancellable *media_info_cancellable;
+
+    GtkWidget *checksum_group;
+    GtkWidget *sha256_row;
+    GtkWidget *sha256_spinner;
+    GtkWidget *copy_sha256_button;
+    GCancellable *sha256_cancellable;
 
     GtkWidget *permissions_navigation_row;
     GtkWidget *permissions_value_label;
@@ -2354,6 +2371,476 @@ should_show_accessed_date (NautilusPropertiesWidget *self)
 }
 
 static gboolean
+should_show_media_info (NautilusPropertiesWidget *self)
+{
+    const char *mime_type;
+
+    if (is_multi_file_window (self) || is_volume_properties (self))
+    {
+        return FALSE;
+    }
+
+    mime_type = nautilus_file_get_mime_type (get_file (self));
+    return mime_type != NULL && g_str_has_prefix (mime_type, "video/");
+}
+
+typedef struct
+{
+    GWeakRef widget;
+} MediaInfoRequest;
+
+static void
+media_info_request_free (MediaInfoRequest *request)
+{
+    g_weak_ref_clear (&request->widget);
+    g_free (request);
+}
+
+static const char *
+json_string_member (JsonObject *object,
+                    const char *member)
+{
+    JsonNode *node;
+
+    if (object == NULL || !json_object_has_member (object, member))
+    {
+        return NULL;
+    }
+
+    node = json_object_get_member (object, member);
+    return JSON_NODE_HOLDS_VALUE (node) && json_node_get_value_type (node) == G_TYPE_STRING
+           ? json_node_get_string (node)
+           : NULL;
+}
+
+static gboolean
+json_boolean_member (JsonObject *object,
+                     const char *member)
+{
+    JsonNode *node;
+
+    if (object == NULL || !json_object_has_member (object, member))
+    {
+        return FALSE;
+    }
+
+    node = json_object_get_member (object, member);
+    return JSON_NODE_HOLDS_VALUE (node) && json_node_get_int (node) != 0;
+}
+
+static const char *
+friendly_codec_name (const char *codec)
+{
+    static const struct
+    {
+        const char *raw;
+        const char *friendly;
+    } names[] = {
+        { "aac", "AAC" },
+        { "ac3", "AC-3" },
+        { "ass", "ASS" },
+        { "dts", "DTS" },
+        { "dvb_subtitle", "DVB" },
+        { "dvd_subtitle", "VobSub" },
+        { "eac3", "E-AC-3" },
+        { "flac", "FLAC" },
+        { "hdmv_pgs_subtitle", "PGS" },
+        { "mov_text", "MOV text" },
+        { "mp3", "MP3" },
+        { "opus", "Opus" },
+        { "subrip", "SRT" },
+        { "truehd", "TrueHD" },
+        { "vorbis", "Vorbis" },
+        { "webvtt", "WebVTT" },
+    };
+
+    for (guint i = 0; i < G_N_ELEMENTS (names); i++)
+    {
+        if (g_strcmp0 (codec, names[i].raw) == 0)
+        {
+            return names[i].friendly;
+        }
+    }
+
+    return codec;
+}
+
+static void
+append_track_field (GString    *description,
+                    const char *value)
+{
+    if (value == NULL || value[0] == '\0')
+    {
+        return;
+    }
+
+    if (description->len > 0)
+    {
+        g_string_append (description, " · ");
+    }
+    g_string_append (description, value);
+}
+
+static char *
+describe_media_stream (JsonObject *stream,
+                       gboolean    audio)
+{
+    g_autoptr (GString) description = g_string_new (NULL);
+    JsonObject *tags = NULL;
+    JsonObject *disposition = NULL;
+    const char *language_code = NULL;
+    const char *track_title = NULL;
+    const char *codec = json_string_member (stream, "codec_name");
+    const char *channel_layout = json_string_member (stream, "channel_layout");
+    g_autofree char *language = NULL;
+    g_autofree char *safe_title = NULL;
+    g_autofree char *channels = NULL;
+
+    if (json_object_has_member (stream, "tags"))
+    {
+        tags = json_object_get_object_member (stream, "tags");
+        language_code = json_string_member (tags, "language");
+        track_title = json_string_member (tags, "title");
+    }
+    if (json_object_has_member (stream, "disposition"))
+    {
+        disposition = json_object_get_object_member (stream, "disposition");
+    }
+
+    if (language_code != NULL &&
+        g_ascii_strcasecmp (language_code, "und") != 0)
+    {
+        language = gnome_get_language_from_code (language_code, NULL);
+        append_track_field (description, language != NULL ? language : language_code);
+    }
+    if (track_title != NULL && track_title[0] != '\0')
+    {
+        safe_title = g_strdup (track_title);
+        g_strdelimit (safe_title, "\t\r\n", ' ');
+        append_track_field (description, safe_title);
+    }
+
+    append_track_field (description, friendly_codec_name (codec));
+
+    if (audio)
+    {
+        if (channel_layout != NULL)
+        {
+            append_track_field (description, channel_layout);
+        }
+        else if (json_object_has_member (stream, "channels"))
+        {
+            guint count = json_object_get_int_member (stream, "channels");
+
+            channels = g_strdup_printf (ngettext ("%u channel", "%u channels", count), count);
+            append_track_field (description, channels);
+        }
+    }
+
+    if (json_boolean_member (disposition, "default"))
+    {
+        append_track_field (description, _("default"));
+    }
+    if (json_boolean_member (disposition, "forced"))
+    {
+        append_track_field (description, _("forced"));
+    }
+
+    return g_string_free (g_steal_pointer (&description), FALSE);
+}
+
+static gboolean
+populate_media_rows (NautilusPropertiesWidget *self,
+                     const char               *output,
+                     GError                  **error)
+{
+    g_autoptr (JsonParser) parser = json_parser_new ();
+    g_autoptr (GString) audio = g_string_new (NULL);
+    g_autoptr (GString) subtitles = g_string_new (NULL);
+    JsonNode *root;
+    JsonObject *root_object;
+    JsonArray *streams;
+    guint audio_count = 0;
+    guint subtitle_count = 0;
+
+    if (!json_parser_load_from_data (parser, output, -1, error))
+    {
+        return FALSE;
+    }
+
+    root = json_parser_get_root (parser);
+    if (!JSON_NODE_HOLDS_OBJECT (root))
+    {
+        g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
+                             "ffprobe returned no JSON object");
+        return FALSE;
+    }
+
+    root_object = json_node_get_object (root);
+    if (!json_object_has_member (root_object, "streams"))
+    {
+        g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
+                             "ffprobe returned no streams");
+        return FALSE;
+    }
+    streams = json_object_get_array_member (root_object, "streams");
+
+    for (guint i = 0; i < json_array_get_length (streams); i++)
+    {
+        JsonObject *stream = json_array_get_object_element (streams, i);
+        const char *type = json_string_member (stream, "codec_type");
+        gboolean is_audio = g_strcmp0 (type, "audio") == 0;
+        gboolean is_subtitle = g_strcmp0 (type, "subtitle") == 0;
+        GString *target;
+        guint *count;
+        g_autofree char *description = NULL;
+
+        if (!is_audio && !is_subtitle)
+        {
+            continue;
+        }
+
+        target = is_audio ? audio : subtitles;
+        count = is_audio ? &audio_count : &subtitle_count;
+        (*count)++;
+        description = describe_media_stream (stream, is_audio);
+        if (target->len > 0)
+        {
+            g_string_append_c (target, '\n');
+        }
+        g_string_append_printf (target, "%u. %s", *count,
+                                description[0] != '\0' ? description : _("Unknown"));
+    }
+
+    {
+        g_autofree char *title = g_strdup_printf (ngettext ("%u Audio Track", "%u Audio Tracks", audio_count),
+                                                  audio_count);
+        adw_preferences_row_set_title (ADW_PREFERENCES_ROW (self->audio_tracks_row), title);
+    }
+    {
+        g_autofree char *title = g_strdup_printf (ngettext ("%u Subtitle Track", "%u Subtitle Tracks", subtitle_count),
+                                                  subtitle_count);
+        adw_preferences_row_set_title (ADW_PREFERENCES_ROW (self->subtitle_tracks_row), title);
+    }
+
+    adw_action_row_set_subtitle (ADW_ACTION_ROW (self->audio_tracks_row),
+                                 audio_count > 0 ? audio->str : _("None"));
+    adw_action_row_set_subtitle (ADW_ACTION_ROW (self->subtitle_tracks_row),
+                                 subtitle_count > 0 ? subtitles->str : _("None"));
+    gtk_widget_set_visible (self->audio_tracks_row, TRUE);
+    gtk_widget_set_visible (self->subtitle_tracks_row, TRUE);
+
+    return TRUE;
+}
+
+static void
+on_media_info_ready (GObject      *source_object,
+                     GAsyncResult *result,
+                     gpointer      user_data)
+{
+    MediaInfoRequest *request = user_data;
+    g_autoptr (NautilusPropertiesWidget) self = g_weak_ref_get (&request->widget);
+    g_autoptr (GError) error = NULL;
+    g_autofree char *output = NULL;
+    g_autofree char *stderr_output = NULL;
+
+    if (self == NULL)
+    {
+        media_info_request_free (request);
+        return;
+    }
+
+    if (!g_subprocess_communicate_utf8_finish (G_SUBPROCESS (source_object), result,
+                                               &output, &stderr_output, &error) ||
+        !g_subprocess_get_successful (G_SUBPROCESS (source_object)) ||
+        !populate_media_rows (self, output != NULL ? output : "", &error))
+    {
+        if (!g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+        {
+            adw_preferences_row_set_title (ADW_PREFERENCES_ROW (self->media_loading_row),
+                                           _("Tracks"));
+            adw_action_row_set_subtitle (ADW_ACTION_ROW (self->media_loading_row),
+                                         _("Could not read track information"));
+            gtk_widget_set_tooltip_text (self->media_loading_row,
+                                         error != NULL ? error->message : stderr_output);
+        }
+    }
+    else
+    {
+        gtk_widget_set_visible (self->media_loading_row, FALSE);
+    }
+
+    gtk_widget_set_visible (self->media_spinner, FALSE);
+    g_clear_object (&self->media_info_cancellable);
+    media_info_request_free (request);
+}
+
+static void
+load_media_info (NautilusPropertiesWidget *self)
+{
+    g_autoptr (GFile) location = NULL;
+    g_autofree char *path = NULL;
+    g_autofree char *ffprobe = NULL;
+    g_autoptr (GSubprocess) process = NULL;
+    g_autoptr (GError) error = NULL;
+    MediaInfoRequest *request;
+    const char *argv[11];
+
+    if (!should_show_media_info (self))
+    {
+        return;
+    }
+
+    location = nautilus_file_get_activation_location (get_file (self));
+    path = location != NULL ? g_file_get_path (location) : NULL;
+    ffprobe = g_find_program_in_path ("ffprobe");
+    if (path == NULL || ffprobe == NULL)
+    {
+        return;
+    }
+
+    gtk_widget_set_visible (self->media_group, TRUE);
+    self->media_info_cancellable = g_cancellable_new ();
+    argv[0] = ffprobe;
+    argv[1] = "-v";
+    argv[2] = "error";
+    argv[3] = "-show_entries";
+    argv[4] = "stream=codec_type,codec_name,channels,channel_layout:stream_tags=language,title:stream_disposition=default,forced";
+    argv[5] = "-of";
+    argv[6] = "json";
+    argv[7] = path;
+    argv[8] = NULL;
+
+    process = g_subprocess_newv (argv,
+                                 G_SUBPROCESS_FLAGS_STDOUT_PIPE |
+                                 G_SUBPROCESS_FLAGS_STDERR_PIPE,
+                                 &error);
+    if (process == NULL)
+    {
+        adw_preferences_row_set_title (ADW_PREFERENCES_ROW (self->media_loading_row), _("Tracks"));
+        adw_action_row_set_subtitle (ADW_ACTION_ROW (self->media_loading_row),
+                                     _("Could not read track information"));
+        gtk_widget_set_tooltip_text (self->media_loading_row, error->message);
+        gtk_widget_set_visible (self->media_spinner, FALSE);
+        g_clear_object (&self->media_info_cancellable);
+        return;
+    }
+
+    request = g_new0 (MediaInfoRequest, 1);
+    g_weak_ref_init (&request->widget, self);
+    g_subprocess_communicate_utf8_async (process, NULL, self->media_info_cancellable,
+                                        on_media_info_ready, request);
+}
+
+static gboolean
+should_show_checksum (NautilusPropertiesWidget *self)
+{
+    return !is_multi_file_window (self) &&
+           !is_volume_properties (self) &&
+           !nautilus_file_is_directory (get_file (self));
+}
+
+/* Runs in a worker thread: stream the file through GChecksum. Reading through
+ * GIO means remote locations work too, not only native paths. */
+static void
+sha256_thread (GTask        *task,
+               gpointer      source_object,
+               gpointer      task_data,
+               GCancellable *cancellable)
+{
+    GFile *location = task_data;
+    g_autoptr (GError) error = NULL;
+    g_autoptr (GFileInputStream) stream = g_file_read (location, cancellable, &error);
+    g_autoptr (GChecksum) checksum = g_checksum_new (G_CHECKSUM_SHA256);
+    g_autofree guchar *buffer = g_malloc (1 << 20);
+    gssize count;
+
+    if (stream == NULL)
+    {
+        g_task_return_error (task, g_steal_pointer (&error));
+        return;
+    }
+
+    while ((count = g_input_stream_read (G_INPUT_STREAM (stream), buffer, 1 << 20,
+                                         cancellable, &error)) > 0)
+    {
+        g_checksum_update (checksum, buffer, count);
+    }
+
+    if (count < 0)
+    {
+        g_task_return_error (task, g_steal_pointer (&error));
+        return;
+    }
+
+    g_task_return_pointer (task, g_strdup (g_checksum_get_string (checksum)), g_free);
+}
+
+static void
+on_sha256_ready (GObject      *source_object,
+                 GAsyncResult *result,
+                 gpointer      user_data)
+{
+    NautilusPropertiesWidget *self = NAUTILUS_PROPERTIES_WIDGET (source_object);
+    g_autoptr (GError) error = NULL;
+    g_autofree char *digest = g_task_propagate_pointer (G_TASK (result), &error);
+
+    if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED) ||
+        self->sha256_row == NULL)
+    {
+        /* The widget is being disposed; its template children are gone. */
+        return;
+    }
+
+    g_clear_object (&self->sha256_cancellable);
+    gtk_widget_set_visible (self->sha256_spinner, FALSE);
+
+    if (digest == NULL)
+    {
+        adw_action_row_set_subtitle (ADW_ACTION_ROW (self->sha256_row),
+                                     _("Could not calculate the checksum"));
+        gtk_widget_set_tooltip_text (self->sha256_row, error->message);
+        gtk_list_box_row_set_activatable (GTK_LIST_BOX_ROW (self->sha256_row), TRUE);
+        return;
+    }
+
+    adw_action_row_set_subtitle (ADW_ACTION_ROW (self->sha256_row), digest);
+    gtk_widget_set_visible (self->copy_sha256_button, TRUE);
+}
+
+static void
+calculate_sha256 (NautilusPropertiesWidget *self)
+{
+    g_autoptr (GTask) task = NULL;
+
+    if (self->sha256_cancellable != NULL)
+    {
+        /* Already running. */
+        return;
+    }
+
+    self->sha256_cancellable = g_cancellable_new ();
+    gtk_list_box_row_set_activatable (GTK_LIST_BOX_ROW (self->sha256_row), FALSE);
+    gtk_widget_set_tooltip_text (self->sha256_row, NULL);
+    adw_action_row_set_subtitle (ADW_ACTION_ROW (self->sha256_row), _("Calculating…"));
+    gtk_widget_set_visible (self->sha256_spinner, TRUE);
+
+    task = g_task_new (self, self->sha256_cancellable, on_sha256_ready, NULL);
+    g_task_set_task_data (task, nautilus_file_get_location (get_file (self)), g_object_unref);
+    g_task_run_in_thread (task, sha256_thread);
+}
+
+static void
+copy_sha256 (NautilusPropertiesWidget *self)
+{
+    const char *digest = adw_action_row_get_subtitle (ADW_ACTION_ROW (self->sha256_row));
+    g_autoptr (AdwToast) toast = adw_toast_new (_("SHA-256 copied to clipboard"));
+
+    gdk_clipboard_set_text (gtk_widget_get_clipboard (GTK_WIDGET (self)), digest);
+    adw_toast_overlay_add_toast (self->toast_overlay, g_steal_pointer (&toast));
+}
+
+static gboolean
 should_show_modified_date (NautilusPropertiesWidget *self)
 {
     return !is_multi_file_window (self);
@@ -2703,6 +3190,13 @@ setup_basic_page (NautilusPropertiesWidget *self)
         gtk_widget_set_visible (self->accessed_row, TRUE);
         add_updatable_row (self, self->accessed_row, "date_accessed_full");
     }
+
+    if (should_show_checksum (self))
+    {
+        gtk_widget_set_visible (self->checksum_group, TRUE);
+    }
+
+    load_media_info (self);
 
     if (should_show_free_space (self))
     {
@@ -3852,6 +4346,12 @@ real_dispose (GObject *object)
     g_clear_handle_id (&self->update_directory_contents_timeout_id, g_source_remove);
     g_clear_handle_id (&self->update_files_timeout_id, g_source_remove);
 
+    g_cancellable_cancel (self->sha256_cancellable);
+    g_clear_object (&self->sha256_cancellable);
+
+    g_cancellable_cancel (self->media_info_cancellable);
+    g_clear_object (&self->media_info_cancellable);
+
     gtk_widget_dispose_template (GTK_WIDGET (self), NAUTILUS_TYPE_PROPERTIES_WIDGET);
 }
 
@@ -4011,6 +4511,15 @@ nautilus_properties_widget_class_init (NautilusPropertiesWidgetClass *klass)
     gtk_widget_class_bind_template_child (widget_class, NautilusPropertiesWidget, modified_row);
     gtk_widget_class_bind_template_child (widget_class, NautilusPropertiesWidget, created_row);
     gtk_widget_class_bind_template_child (widget_class, NautilusPropertiesWidget, accessed_row);
+    gtk_widget_class_bind_template_child (widget_class, NautilusPropertiesWidget, media_group);
+    gtk_widget_class_bind_template_child (widget_class, NautilusPropertiesWidget, media_loading_row);
+    gtk_widget_class_bind_template_child (widget_class, NautilusPropertiesWidget, media_spinner);
+    gtk_widget_class_bind_template_child (widget_class, NautilusPropertiesWidget, audio_tracks_row);
+    gtk_widget_class_bind_template_child (widget_class, NautilusPropertiesWidget, subtitle_tracks_row);
+    gtk_widget_class_bind_template_child (widget_class, NautilusPropertiesWidget, checksum_group);
+    gtk_widget_class_bind_template_child (widget_class, NautilusPropertiesWidget, sha256_row);
+    gtk_widget_class_bind_template_child (widget_class, NautilusPropertiesWidget, sha256_spinner);
+    gtk_widget_class_bind_template_child (widget_class, NautilusPropertiesWidget, copy_sha256_button);
     gtk_widget_class_bind_template_child (widget_class, NautilusPropertiesWidget, permissions_navigation_row);
     gtk_widget_class_bind_template_child (widget_class, NautilusPropertiesWidget, permissions_value_label);
     gtk_widget_class_bind_template_child (widget_class, NautilusPropertiesWidget, extension_models_group);
@@ -4039,6 +4548,8 @@ nautilus_properties_widget_class_init (NautilusPropertiesWidgetClass *klass)
     gtk_widget_class_bind_template_callback (widget_class, star_clicked);
     gtk_widget_class_bind_template_callback (widget_class, popout_window_clicked);
     gtk_widget_class_bind_template_callback (widget_class, open_in_disks);
+    gtk_widget_class_bind_template_callback (widget_class, calculate_sha256);
+    gtk_widget_class_bind_template_callback (widget_class, copy_sha256);
     gtk_widget_class_bind_template_callback (widget_class, open_parent_folder);
     gtk_widget_class_bind_template_callback (widget_class, open_link_target);
     gtk_widget_class_bind_template_callback (widget_class, navigate_permissions_page);

@@ -14166,3 +14166,64 @@ msgstr "Valores predeterminados por usuario para acciones parametrizadas del men
 #: data/org.gnome.nautilus.gschema.xml
 msgid "Maps stable action identifiers to the value used by the primary zone of split context-menu actions. Values from installed action files remain the factory defaults."
 msgstr "Asocia identificadores estables de acciones con el valor usado por la zona principal de las acciones partidas. Los valores de los archivos de acción instalados siguen siendo los predeterminados de fábrica."
+
+#: src/resources/ui/nautilus-properties-widget.blp
+msgid "Click to calculate"
+msgstr "Pulsa para calcular"
+
+#: src/nautilus-properties.c
+msgid "Calculating…"
+msgstr "Calculando…"
+
+#: src/nautilus-properties.c
+msgid "Could not calculate the checksum"
+msgstr "No se pudo calcular la suma de verificación"
+
+#: src/nautilus-properties.c
+msgid "SHA-256 copied to clipboard"
+msgstr "SHA-256 copiado al portapapeles"
+
+#: src/resources/ui/nautilus-properties-widget.blp
+msgid "Multimedia"
+msgstr "Multimedia"
+
+#: src/nautilus-properties.c src/resources/ui/nautilus-properties-widget.blp
+msgid "Tracks"
+msgstr "Pistas"
+
+#: src/resources/ui/nautilus-properties-widget.blp
+msgid "Reading track information…"
+msgstr "Leyendo información de las pistas…"
+
+#: src/nautilus-properties.c
+msgid "Could not read track information"
+msgstr "No se pudo leer la información de las pistas"
+
+#: src/nautilus-properties.c
+#, c-format
+msgid "%u Audio Track"
+msgid_plural "%u Audio Tracks"
+msgstr[0] "%u pista de audio"
+msgstr[1] "%u pistas de audio"
+
+#: src/nautilus-properties.c
+#, c-format
+msgid "%u Subtitle Track"
+msgid_plural "%u Subtitle Tracks"
+msgstr[0] "%u pista de subtítulos"
+msgstr[1] "%u pistas de subtítulos"
+
+#: src/nautilus-properties.c
+#, c-format
+msgid "%u channel"
+msgid_plural "%u channels"
+msgstr[0] "%u canal"
+msgstr[1] "%u canales"
+
+#: src/nautilus-properties.c
+msgid "default"
+msgstr "predeterminada"
+
+#: src/nautilus-properties.c
+msgid "forced"
+msgstr "forzada"
