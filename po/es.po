@@ -14037,3 +14037,132 @@ msgstr "_Aplanar contenido…"
 
 msgid "Pasted text"
 msgstr "Texto pegado"
+
+msgid "Custom actions block"
+msgstr "Bloque de acciones personalizadas"
+
+msgid "Next to “Open in Terminal” and other openers"
+msgstr "Junto a «Abrir en terminal» y otras formas de abrir"
+
+msgid "Menu block"
+msgstr "Bloque del menú"
+
+msgid "Overwrite “%s”?"
+msgstr "¿Sobrescribir «%s»?"
+
+msgid ""
+"Its content will be replaced with the text in the clipboard. The previous "
+"version is moved to the trash."
+msgstr ""
+"Su contenido se reemplazará por el texto del portapapeles. La versión "
+"anterior va a la papelera."
+
+msgid "_Overwrite"
+msgstr "_Sobrescribir"
+
+#: src/dori-action.c
+#, c-format
+msgid "%u second"
+msgid_plural "%u seconds"
+msgstr[0] "%u segundo"
+msgstr[1] "%u segundos"
+
+#: src/dori-action.c
+#, c-format
+msgid "%u min %02u s"
+msgstr "%u min %02u s"
+
+#: src/dori-action.c
+#, c-format
+msgid "Running for %s"
+msgstr "En ejecución desde hace %s"
+
+#: src/dori-action.c
+#, c-format
+msgid "%d%% · about %s remaining%s%s"
+msgstr "%d%% · quedan unos %s%s%s"
+
+#: src/dori-action.c
+#, c-format
+msgid "%d%% · running for %s%s%s"
+msgstr "%d%% · en ejecución desde hace %s%s%s"
+
+#: src/dori-action.c
+#, c-format
+msgid "“%s” completed"
+msgstr "«%s» ha finalizado"
+
+#: src/dori-action.c
+#, c-format
+msgid "“%s” failed"
+msgstr "«%s» ha fallado"
+
+#: src/dori-action.c
+msgid "Completed"
+msgstr "Completada"
+
+#: src/dori-action.c
+#, c-format
+msgid "Running “%s”"
+msgstr "Ejecutando «%s»"
+
+#: src/dori-action.c
+msgid "Starting…"
+msgstr "Iniciando…"
+
+#: src/dori-action.c
+msgid "Run uses the value once; Save makes it the new default and runs."
+msgstr "Ejecutar usa el valor una vez; Guardar lo convierte en el nuevo predeterminado y ejecuta."
+
+#: src/nautilus-files-view.c
+#, c-format
+msgid "Configure %s"
+msgstr "Configurar %s"
+
+#: src/nautilus-files-view.c
+msgid "Run immediately with the displayed default value"
+msgstr "Ejecutar inmediatamente con el valor predeterminado mostrado"
+
+#: src/nautilus-files-view.c
+msgid "Choose a value for this run or save a new default"
+msgstr "Elegir un valor para esta ejecución o guardar un nuevo predeterminado"
+
+#: src/dori-action-editor.c
+msgid "Input"
+msgstr "Entrada"
+
+#: src/dori-action-editor.c
+msgid "Ask for one value before running. Split actions can run the default immediately or open the input dialog."
+msgstr "Solicita un valor antes de ejecutar. Las acciones partidas pueden usar inmediatamente el predeterminado o abrir el diálogo de entrada."
+
+#: src/dori-action-editor.c
+msgid "Question (optional)"
+msgstr "Pregunta (opcional)"
+
+#: src/dori-action-editor.c
+msgid "Default value"
+msgstr "Valor predeterminado"
+
+#: src/dori-action-editor.c
+msgid "Always open the input dialog"
+msgstr "Abrir siempre el diálogo de entrada"
+
+#: src/dori-action-editor.c
+msgid "Run the default or configure"
+msgstr "Ejecutar el predeterminado o configurar"
+
+#: src/dori-action-editor.c
+msgid "Activation"
+msgstr "Activación"
+
+#: src/dori-action-editor.c
+msgid "Value shown in menu"
+msgstr "Valor mostrado en el menú"
+
+#: data/org.gnome.nautilus.gschema.xml
+msgid "Per-user defaults for parameterized context-menu actions"
+msgstr "Valores predeterminados por usuario para acciones parametrizadas del menú contextual"
+
+#: data/org.gnome.nautilus.gschema.xml
+msgid "Maps stable action identifiers to the value used by the primary zone of split context-menu actions. Values from installed action files remain the factory defaults."
+msgstr "Asocia identificadores estables de acciones con el valor usado por la zona principal de las acciones partidas. Los valores de los archivos de acción instalados siguen siendo los predeterminados de fábrica."

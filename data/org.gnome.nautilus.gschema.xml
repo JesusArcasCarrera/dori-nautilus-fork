@@ -124,6 +124,11 @@
       <summary>Whether to show context menu items to create links from copied or selected files</summary>
       <description>If set to true, Files will show context menu items to create links from the copied or selected files.</description>
     </key>
+    <key type="a{ss}" name="action-prompt-defaults">
+      <default>{}</default>
+      <summary>Per-user defaults for parameterized context-menu actions</summary>
+      <description>Maps stable action identifiers to the value used by the primary zone of split context-menu actions. Values from installed action files remain the factory defaults.</description>
+    </key>
     <key name="show-directory-item-counts" enum="org.gnome.nautilus.SpeedTradeoff">
       <aliases><alias value='local_only' target='local-only'/></aliases>
       <default>'local-only'</default>

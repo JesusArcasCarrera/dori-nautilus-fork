@@ -92,16 +92,55 @@ Three action types are supported:
     `%F` (all paths), `%U` (all URIs), `%f` / `%u` (first), `%P` (parent
     folder), `%N` (basenames), `%%`.
   - `create-from-clipboard` — built-in, no external tools needed. Creates
-    a new text file in the folder with the current clipboard text.
+    a new file in the folder with the current clipboard text (same type
+    detection as the default Paste; kept for Nemo compatibility).
   - `overwrite-from-clipboard` — built-in. Replaces the selected file's
-    contents with the clipboard text.
+    content with the clipboard text. Only offered for a single text-like file
+    (text/*, JSON, XML, shell, YAML…) when the clipboard holds text; always
+    asks for confirmation, and the previous version goes to the trash (or to a
+    `name~` backup where there is no trash) so it can be recovered.
+
+An action can ask a question first with `Prompt` (and `Prompt-Default`):
+Nautilus shows a small dialog with an entry before running, and the answer is
+available as `%p` in `Exec` (shell-quoted) and as `$DORI_PROMPT`.
+
+Parameterized actions can opt into a split menu row with
+`Prompt-Mode=split`. Its main zone runs immediately with the effective default;
+the smaller arrow opens the input dialog, where the value can be used once or
+saved as the new per-user default. `Prompt-Display-Format` accepts one `%s` and
+controls how that value is shown beside the action name (for example `%s fps`).
+Missing or invalid split parameters fall back to the legacy ask-every-time
+behavior. User overrides live in GSettings and never rewrite installed action
+files.
+
+Every command action is tracked by Nautilus' native operations indicator. A
+command with no progress integration gets an indeterminate activity bar plus
+elapsed time; cancelling or pausing the operation controls its complete
+process group. Commands which can measure their work may publish determinate
+progress by atomically replacing the file named by `$DORI_PROGRESS_FILE` with
+one UTF-8 TSV line:
+
+```text
+current<TAB>total<TAB>remaining-seconds<TAB>details
+```
+
+The remaining-time and details fields may be empty. Invalid or partially
+written updates are ignored, so a command always falls back safely to the
+indeterminate display.
 
 Visibility is filtered by `Selection`
 (`None`/`Single`/`Multiple`/`Any` or a number), `Extensions` (incl.
 `dir`/`nodirs`/`any`), `Mimetypes` (with `prefix/*` wildcards) and
 `Dependencies` (programs that must be on `$PATH`, otherwise the entry hides).
 Actions can be placed in `Group` (which becomes a submenu) and reordered
-with `Position`. A GUI editor is planned (see Roadmap).
+with `Position`. The optional, invisible `Section` identifier inserts a native
+separator whenever it changes between consecutive visible actions in the same
+group, so dynamic menus remain grouped without relying on position heuristics.
+`Placement=open` moves an action (or its whole `Group`
+submenu) out of the custom-actions block and into the "open with" block, next
+to "Open in Terminal" and other openers contributed by extensions — handy for
+"Open in VS Code"-style entries. Actions can be created and edited from
+Preferences → Custom Actions.
 
 Example:
 
@@ -112,6 +151,7 @@ Exec=code %F
 Selection=Any
 Dependencies=code
 Group=Editors
+Section=open
 Position=10
 Icon-Name=visual-studio-code
 ```

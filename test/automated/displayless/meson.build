@@ -2,6 +2,7 @@ tracker_sandbox = find_program('localsearch')
 
 tests = {
   'test-bookmarks': {},
+  'test-dori-action': {},
   'test-disk-usage-model': {},
   'test-directory': {},
   'test-file': {},

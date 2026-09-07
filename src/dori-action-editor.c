@@ -28,8 +28,14 @@ struct _DoriActionEditor
     AdwEntryRow *name_entry;
     AdwComboRow *type_combo;
     AdwEntryRow *exec_entry;
+    AdwEntryRow *prompt_entry;
+    AdwEntryRow *prompt_default_entry;
+    AdwEntryRow *prompt_display_format_entry;
+    AdwComboRow *prompt_mode_combo;
+    GtkWidget   *prompt_group;
     AdwComboRow *selection_combo;
     AdwEntryRow *group_entry;
+    AdwComboRow *placement_combo;
 };
 
 G_DEFINE_FINAL_TYPE (DoriActionEditor, dori_action_editor, ADW_TYPE_DIALOG)
@@ -73,6 +79,46 @@ selection_nick_to_index (const char *nick)
         }
     }
     return 0;
+}
+
+static void
+update_prompt_controls (DoriActionEditor *self)
+{
+    gboolean is_command = adw_combo_row_get_selected (self->type_combo) == 0;
+    gboolean is_split = adw_combo_row_get_selected (self->prompt_mode_combo) == 1;
+
+    gtk_widget_set_sensitive (self->prompt_group, is_command);
+    gtk_widget_set_sensitive (GTK_WIDGET (self->prompt_display_format_entry),
+                              is_command && is_split);
+}
+
+static gboolean
+prompt_display_format_is_valid (const char *format)
+{
+    guint substitutions = 0;
+
+    for (const char *character = format; character != NULL && *character != '\0'; character++)
+    {
+        if (*character != '%')
+        {
+            continue;
+        }
+
+        character++;
+        if (*character == '%')
+        {
+            continue;
+        }
+        if (*character == 's')
+        {
+            substitutions++;
+            continue;
+        }
+
+        return FALSE;
+    }
+
+    return substitutions == 1;
 }
 
 /* Turn an arbitrary user-supplied string into a safe lower-case file-name
@@ -158,7 +204,13 @@ on_save_clicked (GtkButton *button,
     g_autoptr (GError) error = NULL;
     const char *name = gtk_editable_get_text (GTK_EDITABLE (self->name_entry));
     const char *exec = gtk_editable_get_text (GTK_EDITABLE (self->exec_entry));
+    const char *prompt = gtk_editable_get_text (GTK_EDITABLE (self->prompt_entry));
+    const char *prompt_default = gtk_editable_get_text (GTK_EDITABLE (self->prompt_default_entry));
+    const char *prompt_display_format = gtk_editable_get_text (
+        GTK_EDITABLE (self->prompt_display_format_entry));
     const char *group = gtk_editable_get_text (GTK_EDITABLE (self->group_entry));
+    guint prompt_mode_idx = adw_combo_row_get_selected (self->prompt_mode_combo);
+    guint placement_idx = adw_combo_row_get_selected (self->placement_combo);
     guint type_idx = adw_combo_row_get_selected (self->type_combo);
     guint sel_idx = adw_combo_row_get_selected (self->selection_combo);
 
@@ -172,20 +224,102 @@ on_save_clicked (GtkButton *button,
         gtk_widget_grab_focus (GTK_WIDGET (self->exec_entry));
         return;
     }
+    if (type_idx == 0 && prompt_mode_idx == 1 &&
+        (prompt == NULL || *prompt == '\0'))
+    {
+        gtk_widget_grab_focus (GTK_WIDGET (self->prompt_entry));
+        return;
+    }
+    if (type_idx == 0 && prompt_mode_idx == 1 &&
+        (prompt_default == NULL || *prompt_default == '\0'))
+    {
+        gtk_widget_grab_focus (GTK_WIDGET (self->prompt_default_entry));
+        return;
+    }
+    if (type_idx == 0 && prompt_mode_idx == 1 &&
+        !prompt_display_format_is_valid (prompt_display_format))
+    {
+        gtk_widget_grab_focus (GTK_WIDGET (self->prompt_display_format_entry));
+        return;
+    }
+
+    /* Start from the existing file so keys the editor does not expose yet
+     * (Icon-Name, Mimetypes, Prompt, ...) survive a round-trip. */
+    if (self->existing_id != NULL)
+    {
+        g_autoptr (GFile) existing = g_file_get_child (self->actions_dir, self->existing_id);
+        g_autofree char *existing_path = g_file_get_path (existing);
+
+        if (existing_path != NULL)
+        {
+            g_key_file_load_from_file (kf, existing_path,
+                                       G_KEY_FILE_KEEP_COMMENTS | G_KEY_FILE_KEEP_TRANSLATIONS,
+                                       NULL);
+        }
+    }
 
     g_key_file_set_string (kf, ACTION_GROUP, "Name", name);
     if (type_idx != 0)
     {
         g_key_file_set_string (kf, ACTION_GROUP, "Type", TYPE_NICKS[type_idx]);
     }
-    if (type_idx == 0)
+    else
     {
+        g_key_file_remove_key (kf, ACTION_GROUP, "Type", NULL);
         g_key_file_set_string (kf, ACTION_GROUP, "Exec", exec);
+    }
+    if (type_idx == 0 && prompt != NULL && *prompt != '\0')
+    {
+        g_key_file_set_string (kf, ACTION_GROUP, "Prompt", prompt);
+        if (prompt_default != NULL && *prompt_default != '\0')
+        {
+            g_key_file_set_string (kf, ACTION_GROUP, "Prompt-Default", prompt_default);
+        }
+        else
+        {
+            g_key_file_remove_key (kf, ACTION_GROUP, "Prompt-Default", NULL);
+        }
+        if (prompt_mode_idx == 1)
+        {
+            g_key_file_set_string (kf, ACTION_GROUP, "Prompt-Mode", "split");
+        }
+        else
+        {
+            g_key_file_remove_key (kf, ACTION_GROUP, "Prompt-Mode", NULL);
+        }
+        if (prompt_mode_idx == 1)
+        {
+            g_key_file_set_string (kf, ACTION_GROUP, "Prompt-Display-Format",
+                                   prompt_display_format);
+        }
+        else
+        {
+            g_key_file_remove_key (kf, ACTION_GROUP, "Prompt-Display-Format", NULL);
+        }
+    }
+    else
+    {
+        g_key_file_remove_key (kf, ACTION_GROUP, "Prompt", NULL);
+        g_key_file_remove_key (kf, ACTION_GROUP, "Prompt-Default", NULL);
+        g_key_file_remove_key (kf, ACTION_GROUP, "Prompt-Mode", NULL);
+        g_key_file_remove_key (kf, ACTION_GROUP, "Prompt-Display-Format", NULL);
     }
     g_key_file_set_string (kf, ACTION_GROUP, "Selection", SELECTION_NICKS[sel_idx]);
     if (group != NULL && *group != '\0')
     {
         g_key_file_set_string (kf, ACTION_GROUP, "Group", group);
+    }
+    else
+    {
+        g_key_file_remove_key (kf, ACTION_GROUP, "Group", NULL);
+    }
+    if (placement_idx == 1)
+    {
+        g_key_file_set_string (kf, ACTION_GROUP, "Placement", "open");
+    }
+    else
+    {
+        g_key_file_remove_key (kf, ACTION_GROUP, "Placement", NULL);
     }
 
     if (self->existing_id != NULL)
@@ -221,10 +355,13 @@ dori_action_editor_init (DoriActionEditor *self)
     GtkWidget *page;
     GtkWidget *basics_group;
     GtkWidget *action_group_widget;
+    GtkWidget *prompt_group;
     GtkWidget *visibility_group;
     GtkWidget *placement_group;
     g_autoptr (GtkStringList) type_model = NULL;
+    g_autoptr (GtkStringList) prompt_mode_model = NULL;
     g_autoptr (GtkStringList) selection_model = NULL;
+    g_autoptr (GtkStringList) placement_model = NULL;
 
     adw_dialog_set_title (ADW_DIALOG (self), _("Action"));
     adw_dialog_set_content_width (ADW_DIALOG (self), 520);
@@ -289,6 +426,52 @@ dori_action_editor_init (DoriActionEditor *self)
     adw_preferences_page_add (ADW_PREFERENCES_PAGE (page),
                               ADW_PREFERENCES_GROUP (action_group_widget));
 
+    /* Input ------------------------------------------------------------- */
+    prompt_group = adw_preferences_group_new ();
+    self->prompt_group = prompt_group;
+    adw_preferences_group_set_title (ADW_PREFERENCES_GROUP (prompt_group),
+                                     _("Input"));
+    adw_preferences_group_set_description (ADW_PREFERENCES_GROUP (prompt_group),
+        _("Ask for one value before running. Split actions can run the default immediately or open the input dialog."));
+
+    self->prompt_entry = ADW_ENTRY_ROW (adw_entry_row_new ());
+    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (self->prompt_entry),
+                                   _("Question (optional)"));
+    adw_preferences_group_add (ADW_PREFERENCES_GROUP (prompt_group),
+                               GTK_WIDGET (self->prompt_entry));
+
+    self->prompt_default_entry = ADW_ENTRY_ROW (adw_entry_row_new ());
+    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (self->prompt_default_entry),
+                                   _("Default value"));
+    adw_preferences_group_add (ADW_PREFERENCES_GROUP (prompt_group),
+                               GTK_WIDGET (self->prompt_default_entry));
+
+    prompt_mode_model = gtk_string_list_new ((const char *[]) {
+        _("Always open the input dialog"),
+        _("Run the default or configure"),
+        NULL,
+    });
+    self->prompt_mode_combo = ADW_COMBO_ROW (adw_combo_row_new ());
+    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (self->prompt_mode_combo),
+                                   _("Activation"));
+    adw_combo_row_set_model (self->prompt_mode_combo, G_LIST_MODEL (prompt_mode_model));
+    adw_preferences_group_add (ADW_PREFERENCES_GROUP (prompt_group),
+                               GTK_WIDGET (self->prompt_mode_combo));
+
+    self->prompt_display_format_entry = ADW_ENTRY_ROW (adw_entry_row_new ());
+    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (self->prompt_display_format_entry),
+                                   _("Value shown in menu"));
+    gtk_editable_set_text (GTK_EDITABLE (self->prompt_display_format_entry), "%s");
+    adw_preferences_group_add (ADW_PREFERENCES_GROUP (prompt_group),
+                               GTK_WIDGET (self->prompt_display_format_entry));
+    adw_preferences_page_add (ADW_PREFERENCES_PAGE (page),
+                              ADW_PREFERENCES_GROUP (prompt_group));
+    g_signal_connect_swapped (self->type_combo, "notify::selected",
+                              G_CALLBACK (update_prompt_controls), self);
+    g_signal_connect_swapped (self->prompt_mode_combo, "notify::selected",
+                              G_CALLBACK (update_prompt_controls), self);
+    update_prompt_controls (self);
+
     /* Visibility -------------------------------------------------------- */
     visibility_group = adw_preferences_group_new ();
     adw_preferences_group_set_title (ADW_PREFERENCES_GROUP (visibility_group),
@@ -320,6 +503,19 @@ dori_action_editor_init (DoriActionEditor *self)
                                    _("Submenu / Group (optional)"));
     adw_preferences_group_add (ADW_PREFERENCES_GROUP (placement_group),
                                GTK_WIDGET (self->group_entry));
+
+    placement_model = gtk_string_list_new ((const char * const[])
+    {
+        _("Custom actions block"),
+        _("Next to “Open in Terminal” and other openers"),
+        NULL,
+    });
+    self->placement_combo = ADW_COMBO_ROW (adw_combo_row_new ());
+    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (self->placement_combo),
+                                   _("Menu block"));
+    adw_combo_row_set_model (self->placement_combo, G_LIST_MODEL (placement_model));
+    adw_preferences_group_add (ADW_PREFERENCES_GROUP (placement_group),
+                               GTK_WIDGET (self->placement_combo));
     adw_preferences_page_add (ADW_PREFERENCES_PAGE (page),
                               ADW_PREFERENCES_GROUP (placement_group));
 
@@ -360,6 +556,9 @@ dori_action_editor_present (DoriAction *action,
     {
         const char *name = dori_action_get_name (action);
         const char *exec = dori_action_get_exec (action);
+        const char *prompt = dori_action_get_prompt (action);
+        const char *prompt_default = dori_action_get_prompt_default (action);
+        const char *prompt_display_format = dori_action_get_prompt_display_format (action);
         const char *group = dori_action_get_group (action);
 
         self->existing_id = g_strdup (dori_action_get_id (action));
@@ -372,6 +571,19 @@ dori_action_editor_present (DoriAction *action,
         {
             gtk_editable_set_text (GTK_EDITABLE (self->exec_entry), exec);
         }
+        if (prompt != NULL)
+        {
+            gtk_editable_set_text (GTK_EDITABLE (self->prompt_entry), prompt);
+        }
+        if (prompt_default != NULL)
+        {
+            gtk_editable_set_text (GTK_EDITABLE (self->prompt_default_entry), prompt_default);
+        }
+        if (prompt_display_format != NULL)
+        {
+            gtk_editable_set_text (GTK_EDITABLE (self->prompt_display_format_entry),
+                                   prompt_display_format);
+        }
         if (group != NULL)
         {
             gtk_editable_set_text (GTK_EDITABLE (self->group_entry), group);
@@ -380,6 +592,10 @@ dori_action_editor_present (DoriAction *action,
             type_nick_to_index (dori_action_get_type_string (action)));
         adw_combo_row_set_selected (self->selection_combo,
             selection_nick_to_index (dori_action_get_selection_string (action)));
+        adw_combo_row_set_selected (self->placement_combo,
+            dori_action_get_placement (action) == DORI_ACTION_PLACEMENT_OPEN ? 1 : 0);
+        adw_combo_row_set_selected (self->prompt_mode_combo,
+            dori_action_get_prompt_mode (action) == DORI_ACTION_PROMPT_SPLIT ? 1 : 0);
     }
 
     adw_dialog_present (ADW_DIALOG (self), parent);

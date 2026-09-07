@@ -34,6 +34,20 @@
   background: none;
 }
 
+/* Split context-menu actions use GtkButton for two independent hit targets,
+ * but their text should keep the same weight as ordinary menu items. */
+.dori-split-action > button {
+  font-weight: normal;
+}
+
+.dori-split-action > button:first-child:dir(ltr) {
+  padding-left: 0;
+}
+
+.dori-split-action > button:first-child:dir(rtl) {
+  padding-right: 0;
+}
+
 /* Path bar */
 
 .nautilus-pathbar {

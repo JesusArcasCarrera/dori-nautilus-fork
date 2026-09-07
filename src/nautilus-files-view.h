@@ -62,6 +62,8 @@ nautilus_files_view_set_search_query (NautilusFilesView *self,
 
 NautilusFileList *
 nautilus_files_view_get_selection (NautilusFilesView *self);
+NautilusFileList *
+nautilus_files_view_get_selection_in_click_order (NautilusFilesView *self);
 gboolean
 nautilus_files_view_is_selection_auto (NautilusFilesView *self);
 void

@@ -179,7 +179,7 @@ dori_action_manager_constructed (GObject *object)
                                           "nemo", "actions", NULL);
     if (g_mkdir_with_parents (self->actions_dir, 0755) != 0)
     {
-        g_warning ("Nemo action manager: cannot create %s: %s",
+        g_warning ("Dori action manager: cannot create %s: %s",
                    self->actions_dir, g_strerror (errno));
     }
     self->actions_location = g_file_new_for_path (self->actions_dir);
@@ -191,7 +191,7 @@ dori_action_manager_constructed (GObject *object)
                                               &monitor_error);
     if (self->monitor == NULL)
     {
-        g_warning ("Nemo action manager: cannot watch %s for changes "
+        g_warning ("Dori action manager: cannot watch %s for changes "
                    "(live reload of .nemo_action files will not work): %s",
                    self->actions_dir,
                    monitor_error != NULL ? monitor_error->message : "unknown error");

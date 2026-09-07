@@ -133,6 +133,7 @@ typedef enum
 /* Context menu options */
 #define NAUTILUS_PREFERENCES_SHOW_DELETE_PERMANENTLY "show-delete-permanently"
 #define NAUTILUS_PREFERENCES_SHOW_CREATE_LINK "show-create-link"
+#define NAUTILUS_PREFERENCES_ACTION_PROMPT_DEFAULTS "action-prompt-defaults"
 
 /* Sidebar built-in entries and sections */
 #define NAUTILUS_PREFERENCES_SIDEBAR_SHOW_RECENT      "sidebar-show-recent"

@@ -234,6 +234,11 @@ struct _NautilusFilesView
     GActionGroup *view_action_group;
     GtkShortcutController *shortcuts;
 
+    /* Selected files in the order they were selected (oldest first). GTK's
+     * selection model is a bitset and forgets click order, so it is rebuilt
+     * incrementally on every selection change. Owned NautilusFile refs. */
+    GList *selection_order;
+
     /* Empty states */
     GtkWidget *empty_view_page;
 
@@ -316,6 +321,10 @@ static void     load_directory (NautilusFilesView *view,
 static void on_clipboard_owner_changed (GdkClipboard *clipboard,
                                         gpointer      user_data);
 static void     schedule_update_context_menus (NautilusFilesView *view);
+static void     build_custom_actions_menu (NautilusFilesView   *self,
+                                           GMenu               *section,
+                                           GList               *selection,
+                                           DoriActionPlacement  placement);
 static void     remove_update_context_menus_timeout_callback (NautilusFilesView *view);
 static void     schedule_update_status (NautilusFilesView *view);
 static void     remove_update_status_idle_callback (NautilusFilesView *view);
@@ -925,6 +934,67 @@ get_selection_internal (NautilusFilesView *self,
     }
 
     return selected_files;
+}
+
+/* Keep self->selection_order in sync with the current selection: drop files
+ * that are no longer selected, append newly selected ones (in visible order
+ * when several arrive at once, e.g. a range or Select All). */
+static void
+update_selection_order (NautilusFilesView *self)
+{
+    g_autolist (NautilusFile) selection = nautilus_files_view_get_selection (self);
+    g_autoptr (GHashTable) selected = g_hash_table_new (NULL, NULL);
+    g_autoptr (GHashTable) tracked = g_hash_table_new (NULL, NULL);
+    GList *l, *next;
+
+    for (l = selection; l != NULL; l = l->next)
+    {
+        g_hash_table_add (selected, l->data);
+    }
+
+    for (l = self->selection_order; l != NULL; l = next)
+    {
+        next = l->next;
+        if (!g_hash_table_contains (selected, l->data))
+        {
+            nautilus_file_unref (l->data);
+            self->selection_order = g_list_delete_link (self->selection_order, l);
+        }
+        else
+        {
+            g_hash_table_add (tracked, l->data);
+        }
+    }
+
+    for (l = selection; l != NULL; l = l->next)
+    {
+        if (!g_hash_table_contains (tracked, l->data))
+        {
+            self->selection_order = g_list_append (self->selection_order,
+                                                   nautilus_file_ref (l->data));
+        }
+    }
+}
+
+/**
+ * nautilus_files_view_get_selection_in_click_order:
+ * @self: a #NautilusFilesView
+ *
+ * Like nautilus_files_view_get_selection(), but ordered by the moment each
+ * file entered the selection instead of by its position in the view.
+ *
+ * Returns: (transfer full): a newly allocated list of the selected files.
+ */
+NautilusFileList *
+nautilus_files_view_get_selection_in_click_order (NautilusFilesView *self)
+{
+    g_return_val_if_fail (NAUTILUS_IS_FILES_VIEW (self), NULL);
+
+    /* The tracker is updated from the selection-changed notification, which
+     * can lag behind by one main-loop iteration; refresh it first. */
+    update_selection_order (self);
+
+    return nautilus_file_list_copy (self->selection_order);
 }
 
 /* The difference from get_selection() is that any files in the selection that
@@ -4084,6 +4154,7 @@ nautilus_files_view_finalize (GObject *object)
     g_clear_object (&self->templates_menu);
     g_clear_object (&self->scripts_menu);
     g_clear_object (&self->action_manager);
+    g_clear_pointer (&self->selection_order, nautilus_file_list_free);
     /* We don't own the slot, so no unref */
     self->slot = NULL;
 
@@ -5731,6 +5802,18 @@ update_extensions_menus (NautilusFilesView *view,
         nautilus_gmenu_set_from_model (G_MENU (object), background_menu);
 
         nautilus_menu_item_list_free (background_items);
+    }
+
+    /* Custom actions with Placement=open share the block with the openers
+     * contributed by extensions ("Open in Terminal", ...). Appended after
+     * nautilus_gmenu_set_from_model, which empties the section first. */
+    {
+        g_autolist (NautilusFile) selection = nautilus_files_view_get_selection (view);
+
+        object = gtk_builder_get_object (builder, "selection-extensions-section");
+        build_custom_actions_menu (view, G_MENU (object), selection, DORI_ACTION_PLACEMENT_OPEN);
+        object = gtk_builder_get_object (builder, "background-extensions-section");
+        build_custom_actions_menu (view, G_MENU (object), NULL, DORI_ACTION_PLACEMENT_OPEN);
     }
 
     real_set_extensions_background_menu (view, background_menu);
@@ -7596,57 +7679,172 @@ action_run_custom_action (GSimpleAction *action,
         return;
     }
 
-    selection = nautilus_files_view_get_selection (self);
+    /* Click order matters for actions that combine files (PDF pages, image
+     * compositions). */
+    selection = nautilus_files_view_get_selection_in_click_order (self);
     location = get_current_location (self);
 
     dori_action_activate (dori_action, selection, location, GTK_WIDGET (self));
 }
 
-/* Append the visible custom actions to a context-menu section: ungrouped
- * actions go straight in, grouped ones each into a named submenu. */
 static void
-build_custom_actions_menu (NautilusFilesView *self,
-                           GMenu             *section,
-                           GList             *selection)
+action_run_custom_action_default (GSimpleAction *action,
+                                  GVariant      *parameter,
+                                  gpointer       user_data)
+{
+    NautilusFilesView *self = NAUTILUS_FILES_VIEW (user_data);
+    const char *id = g_variant_get_string (parameter, NULL);
+    DoriAction *dori_action;
+    g_autolist (NautilusFile) selection = NULL;
+    g_autoptr (GFile) location = NULL;
+
+    dori_action = dori_action_manager_get_action (self->action_manager, id);
+    if (dori_action == NULL)
+    {
+        return;
+    }
+
+    selection = nautilus_files_view_get_selection_in_click_order (self);
+    location = get_current_location (self);
+
+    dori_action_activate_default (dori_action, selection, location, GTK_WIDGET (self));
+}
+
+static char *
+split_action_custom_id (DoriAction *action)
+{
+    return g_strconcat ("dori-split-action-", dori_action_get_id (action), NULL);
+}
+
+typedef struct
+{
+    GMenu *root;
+    GMenu *current;
+    char  *section;
+} CustomActionMenu;
+
+static CustomActionMenu *
+custom_action_menu_new (void)
+{
+    CustomActionMenu *menu = g_new0 (CustomActionMenu, 1);
+
+    menu->root = g_menu_new ();
+    menu->current = menu->root;
+
+    return menu;
+}
+
+static void
+custom_action_menu_free (CustomActionMenu *menu)
+{
+    g_clear_object (&menu->root);
+    g_clear_pointer (&menu->section, g_free);
+    g_free (menu);
+}
+
+static GMenu *
+custom_action_menu_get_section (CustomActionMenu *menu,
+                                const char       *section)
+{
+    const char *normalized = section != NULL ? section : "";
+
+    if (menu->section == NULL)
+    {
+        menu->section = g_strdup (normalized);
+    }
+    else if (g_strcmp0 (menu->section, normalized) != 0)
+    {
+        GMenu *next = g_menu_new ();
+
+        g_menu_append_section (menu->root, NULL, G_MENU_MODEL (next));
+        menu->current = next; /* Borrowed from the section item in root. */
+        g_object_unref (next);
+
+        g_free (menu->section);
+        menu->section = g_strdup (normalized);
+    }
+
+    return menu->current;
+}
+
+/* Append the visible custom actions with the given placement to a
+ * context-menu section: ungrouped actions go straight in, grouped ones each
+ * into a named submenu. A change in the optional Section key inserts a native
+ * menu separator without exposing the section identifier as another label. */
+static void
+build_custom_actions_menu (NautilusFilesView   *self,
+                           GMenu               *section,
+                           GList               *selection,
+                           DoriActionPlacement  placement)
 {
     GList *actions = dori_action_manager_get_actions (self->action_manager);
-    g_autoptr (GMenu) ungrouped = g_menu_new ();
-    g_autoptr (GHashTable) groups = g_hash_table_new_full (g_str_hash, g_str_equal,
-                                                           g_free, g_object_unref);
-    g_autoptr (GPtrArray) group_order = g_ptr_array_new_with_free_func (g_free);
+    g_autoptr (GHashTable) groups = NULL;
+    g_autoptr (GPtrArray) group_order = NULL;
+    CustomActionMenu *ungrouped = custom_action_menu_new ();
+
+    groups = g_hash_table_new_full (g_str_hash, g_str_equal, g_free,
+                                    (GDestroyNotify) custom_action_menu_free);
+    group_order = g_ptr_array_new_with_free_func (g_free);
 
     for (GList *l = actions; l != NULL; l = l->next)
     {
         DoriAction *dori_action = l->data;
         const char *group_name;
+        const char *section_name;
         const char *icon_name;
+        CustomActionMenu *menu;
         GMenu *target;
         g_autoptr (GMenuItem) item = NULL;
 
-        if (!dori_action_is_visible (dori_action, selection))
+        if (dori_action_get_placement (dori_action) != placement ||
+            !dori_action_is_visible (dori_action, selection))
         {
             continue;
+        }
+
+        /* Overwriting with the clipboard only makes sense when there is text in it. */
+        if (g_strcmp0 (dori_action_get_type_string (dori_action), "overwrite-from-clipboard") == 0)
+        {
+            GdkClipboard *clipboard = gtk_widget_get_clipboard (GTK_WIDGET (self));
+            GdkContentFormats *formats = gdk_clipboard_get_formats (clipboard);
+
+            if (!gdk_content_formats_contain_gtype (formats, G_TYPE_STRING))
+            {
+                continue;
+            }
         }
 
         group_name = dori_action_get_group (dori_action);
         if (group_name != NULL && *group_name != '\0')
         {
-            target = g_hash_table_lookup (groups, group_name);
-            if (target == NULL)
+            menu = g_hash_table_lookup (groups, group_name);
+            if (menu == NULL)
             {
-                target = g_menu_new ();
-                g_hash_table_insert (groups, g_strdup (group_name), target);
+                menu = custom_action_menu_new ();
+                g_hash_table_insert (groups, g_strdup (group_name), menu);
                 g_ptr_array_add (group_order, g_strdup (group_name));
             }
         }
         else
         {
-            target = ungrouped;
+            menu = ungrouped;
         }
+        section_name = dori_action_get_section (dori_action);
+        target = custom_action_menu_get_section (menu, section_name);
 
-        item = g_menu_item_new (dori_action_get_name (dori_action), NULL);
-        g_menu_item_set_action_and_target_value (item, "view.run-custom-action",
-                                                 g_variant_new_string (dori_action_get_id (dori_action)));
+        if (dori_action_has_split_prompt (dori_action))
+        {
+            g_autofree char *custom_id = split_action_custom_id (dori_action);
+
+            item = g_menu_item_new (NULL, NULL);
+            g_menu_item_set_attribute (item, "custom", "s", custom_id);
+        }
+        else
+        {
+            item = g_menu_item_new (dori_action_get_name (dori_action), NULL);
+            g_menu_item_set_action_and_target_value (item, "view.run-custom-action",
+                                                     g_variant_new_string (dori_action_get_id (dori_action)));
+        }
 
         icon_name = dori_action_get_icon_name (dori_action);
         if (icon_name != NULL)
@@ -7658,22 +7856,25 @@ build_custom_actions_menu (NautilusFilesView *self,
         g_menu_append_item (target, item);
     }
 
-    if (g_menu_model_get_n_items (G_MENU_MODEL (ungrouped)) > 0)
+    if (g_menu_model_get_n_items (G_MENU_MODEL (ungrouped->root)) > 0)
     {
-        g_menu_append_section (section, NULL, G_MENU_MODEL (ungrouped));
+        g_menu_append_section (section, NULL, G_MENU_MODEL (ungrouped->root));
     }
     for (guint i = 0; i < group_order->len; i++)
     {
         const char *name = g_ptr_array_index (group_order, i);
-        GMenu *group_menu = g_hash_table_lookup (groups, name);
+        CustomActionMenu *group_menu = g_hash_table_lookup (groups, name);
 
-        g_menu_append_submenu (section, name, G_MENU_MODEL (group_menu));
+        g_menu_append_submenu (section, name, G_MENU_MODEL (group_menu->root));
     }
+
+    custom_action_menu_free (ungrouped);
 }
 
 const GActionEntry view_entries[] =
 {
     { .name = "run-custom-action", .parameter_type = "s", .activate = action_run_custom_action },
+    { .name = "run-custom-action-default", .parameter_type = "s", .activate = action_run_custom_action_default },
     /* Toolbar menu */
     { .name = "zoom-in", .activate = action_zoom_in },
     { .name = "zoom-out", .activate = action_zoom_out },
@@ -8769,6 +8970,19 @@ update_selection_menu (NautilusFilesView *self,
 
     selection = nautilus_files_view_get_selection (self);
 
+    /* The parent submenu has no action of its own, so hiding all its disabled
+     * children would otherwise leave an empty “Clean” row for regular files.
+     * Remove the whole section unless the selection is exactly one folder on
+     * which folder tools can currently run. */
+    object = gtk_builder_get_object (builder, "selection-folder-tools-section");
+    if (mode != NAUTILUS_MODE_BROWSE ||
+        self->folder_tool_cancellable != NULL ||
+        !list_len_is_one (selection) ||
+        !file_can_use_folder_tools (selection->data))
+    {
+        g_menu_remove_all (G_MENU (object));
+    }
+
     show_mount = (selection != NULL);
     show_unmount = (selection != NULL);
     show_eject = (selection != NULL);
@@ -9024,7 +9238,8 @@ update_selection_menu (NautilusFilesView *self,
         g_autolist (NautilusFile) custom_selection = nautilus_files_view_get_selection (self);
 
         object = gtk_builder_get_object (builder, "selection-custom-actions-section");
-        build_custom_actions_menu (self, G_MENU (object), custom_selection);
+        build_custom_actions_menu (self, G_MENU (object), custom_selection,
+                                   DORI_ACTION_PLACEMENT_DEFAULT);
     }
 
     object = gtk_builder_get_object (builder, "open-with-application-section");
@@ -9052,6 +9267,18 @@ update_background_menu (NautilusFilesView *self,
     GObject *object;
     gboolean remove_submenu = TRUE;
     gint i;
+
+    object = gtk_builder_get_object (builder, "background-folder-tools-section");
+    if (mode != NAUTILUS_MODE_BROWSE ||
+        self->folder_tool_cancellable != NULL ||
+        showing_recent_directory (self) ||
+        nautilus_files_view_is_searching (self) ||
+        showing_starred_directory (self) ||
+        NAUTILUS_IS_NETWORK_VIEW (self->list_base) ||
+        !file_can_use_folder_tools (self->directory_as_file))
+    {
+        g_menu_remove_all (G_MENU (object));
+    }
 
     if (nautilus_files_view_supports_creating_files (self) &&
         !showing_recent_directory (self) &&
@@ -9090,7 +9317,7 @@ update_background_menu (NautilusFilesView *self,
                                             remove_submenu ? "action-missing" : NULL);
 
     object = gtk_builder_get_object (builder, "background-custom-actions-section");
-    build_custom_actions_menu (self, G_MENU (object), NULL);
+    build_custom_actions_menu (self, G_MENU (object), NULL, DORI_ACTION_PLACEMENT_DEFAULT);
 
     const char *view_name = (NAUTILUS_IS_NETWORK_VIEW (self->list_base) ||
                              NAUTILUS_IS_OTHER_LOCATIONS_VIEW (self->list_base))
@@ -9178,6 +9405,298 @@ nautilus_files_view_update_toolbar_menus (NautilusFilesView *self)
     nautilus_files_view_reset_view_menu (self);
 }
 
+typedef struct
+{
+    const char *action_name;
+    const char *icon_name;
+    const char *label;             /* same msgid the menu item used, so the
+                                    * existing translations apply */
+    gboolean hide_when_disabled;   /* mirrors hidden-when="action-disabled" */
+} ContextMenuQuickAction;
+
+static char *
+strip_mnemonic (const char *label)
+{
+    g_autoptr (GString) text = g_string_new (NULL);
+
+    for (const char *character = label; *character != '\0'; character++)
+    {
+        if (*character != '_')
+        {
+            g_string_append_c (text, *character);
+            continue;
+        }
+
+        if (*(character + 1) == '_')
+        {
+            g_string_append_c (text, '_');
+            character++;
+        }
+    }
+
+    /* A trailing ellipsis announces a follow-up dialog in a menu item, but
+     * reads oddly in a tooltip. */
+    if (g_str_has_suffix (text->str, "…"))
+    {
+        g_string_truncate (text, text->len - strlen ("…"));
+    }
+    else if (g_str_has_suffix (text->str, "..."))
+    {
+        g_string_truncate (text, text->len - 3);
+    }
+
+    return g_string_free_and_steal (g_steal_pointer (&text));
+}
+
+static void
+on_quick_action_enabled_changed (GActionGroup *group,
+                                 const char   *action_name,
+                                 gboolean      enabled,
+                                 gpointer      user_data)
+{
+    gtk_widget_set_visible (GTK_WIDGET (user_data), enabled);
+}
+
+static GtkWidget *
+create_context_menu_quick_action_button (GtkPopoverMenu *popover,
+                                         GActionGroup   *view_actions,
+                                         const char     *action_name,
+                                         const char     *icon_name,
+                                         const char     *label,
+                                         gboolean        hide_when_disabled)
+{
+    GtkWidget *button = gtk_button_new_from_icon_name (icon_name);
+
+    if (hide_when_disabled && g_str_has_prefix (action_name, "view."))
+    {
+        const char *bare_name = action_name + strlen ("view.");
+        g_autofree char *detailed_signal = g_strconcat ("action-enabled-changed::",
+                                                        bare_name, NULL);
+
+        gtk_widget_set_visible (button,
+                                g_action_group_get_action_enabled (view_actions, bare_name));
+        g_signal_connect_object (view_actions, detailed_signal,
+                                 G_CALLBACK (on_quick_action_enabled_changed), button, 0);
+    }
+
+    gtk_widget_set_hexpand (button, TRUE);
+    gtk_widget_set_focusable (button, TRUE);
+    gtk_widget_add_css_class (button, "flat");
+    gtk_widget_set_tooltip_text (button, label);
+    gtk_accessible_update_property (GTK_ACCESSIBLE (button),
+                                    GTK_ACCESSIBLE_PROPERTY_LABEL, label,
+                                    -1);
+    gtk_actionable_set_action_name (GTK_ACTIONABLE (button), action_name);
+    g_signal_connect_object (button, "clicked",
+                             G_CALLBACK (gtk_popover_popdown), popover,
+                             G_CONNECT_SWAPPED | G_CONNECT_AFTER);
+
+    return button;
+}
+
+/* The buttons replace the equivalent text items of the context menu (removed
+ * from nautilus-files-view-context-menus.ui), so each one reuses that item's
+ * label msgid and its hidden-when behaviour. */
+static void
+add_context_menu_quick_actions (GtkPopoverMenu *popover,
+                                GActionGroup   *view_actions,
+                                gboolean        for_selection)
+{
+    static const ContextMenuQuickAction selection_actions[] =
+    {
+        { "view.cut", "edit-cut-symbolic", N_("Cu_t"), FALSE },
+        { "view.copy", "edit-copy-symbolic", N_("_Copy"), FALSE },
+        { "view.rename", "document-edit-symbolic", N_("Rena_me…"), FALSE },
+        { "view.move-to-trash", "user-trash-symbolic", N_("Mo_ve to Trash"), TRUE },
+    };
+    static const ContextMenuQuickAction background_actions[] =
+    {
+        { "view.new-folder", "folder-new-symbolic", N_("New _Folder…"), FALSE },
+        { "view.paste", "edit-paste-symbolic", N_("_Paste"), FALSE },
+        { "view.select-all", "edit-select-all-symbolic", N_("Select _All"), FALSE },
+        { "view.current-directory-console", "utilities-terminal-symbolic",
+          N_("Open in Consol_e"), TRUE },
+    };
+    const ContextMenuQuickAction *actions = for_selection ? selection_actions :
+                                                            background_actions;
+    const guint n_actions = G_N_ELEMENTS (selection_actions);
+    const char *custom_id = for_selection ? "selection-quick-actions" :
+                                            "background-quick-actions";
+    GtkWidget *box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
+
+    G_STATIC_ASSERT (G_N_ELEMENTS (selection_actions) == G_N_ELEMENTS (background_actions));
+
+    gtk_box_set_homogeneous (GTK_BOX (box), TRUE);
+    gtk_widget_set_margin_start (box, 8);
+    gtk_widget_set_margin_end (box, 8);
+    gtk_widget_set_margin_top (box, 4);
+    gtk_widget_set_margin_bottom (box, 4);
+
+    for (guint i = 0; i < n_actions; i++)
+    {
+        g_autofree char *label = strip_mnemonic (_(actions[i].label));
+        GtkWidget *button;
+
+        button = create_context_menu_quick_action_button (popover,
+                                                          view_actions,
+                                                          actions[i].action_name,
+                                                          actions[i].icon_name,
+                                                          label,
+                                                          actions[i].hide_when_disabled);
+        gtk_box_append (GTK_BOX (box), button);
+    }
+
+    if (!gtk_popover_menu_add_child (popover, box, custom_id))
+    {
+        g_warning ("Could not add context-menu quick actions at custom item ‘%s’",
+                   custom_id);
+        g_object_ref_sink (box);
+        g_object_unref (box);
+    }
+}
+
+static gboolean
+focus_split_action_secondary (GtkEventControllerKey *controller,
+                              guint                  keyval,
+                              guint                  keycode,
+                              GdkModifierType        state,
+                              gpointer               user_data)
+{
+    GtkWidget *source = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (controller));
+    guint forward = gtk_widget_get_direction (source) == GTK_TEXT_DIR_RTL ? GDK_KEY_Left :
+                                                                         GDK_KEY_Right;
+
+    if (keyval == forward)
+    {
+        gtk_widget_grab_focus (GTK_WIDGET (user_data));
+        return GDK_EVENT_STOP;
+    }
+
+    return GDK_EVENT_PROPAGATE;
+}
+
+static gboolean
+focus_split_action_primary (GtkEventControllerKey *controller,
+                            guint                  keyval,
+                            guint                  keycode,
+                            GdkModifierType        state,
+                            gpointer               user_data)
+{
+    GtkWidget *source = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (controller));
+    guint backward = gtk_widget_get_direction (source) == GTK_TEXT_DIR_RTL ? GDK_KEY_Right :
+                                                                          GDK_KEY_Left;
+
+    if (keyval == backward)
+    {
+        gtk_widget_grab_focus (GTK_WIDGET (user_data));
+        return GDK_EVENT_STOP;
+    }
+
+    return GDK_EVENT_PROPAGATE;
+}
+
+static GtkWidget *
+create_split_action_row (GtkPopoverMenu *popover,
+                         DoriAction     *action)
+{
+    g_autofree char *display_name = dori_action_dup_display_name (action);
+    g_autofree char *configure_label = g_strdup_printf (_("Configure %s"),
+                                                        dori_action_get_name (action));
+    GtkWidget *box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+    GtkWidget *primary = gtk_button_new ();
+    GtkWidget *label = gtk_label_new (display_name);
+    GtkWidget *configure = gtk_button_new_from_icon_name ("go-next-symbolic");
+    GtkEventController *primary_keys = gtk_event_controller_key_new ();
+    GtkEventController *configure_keys = gtk_event_controller_key_new ();
+    g_autoptr (GVariant) target = g_variant_ref_sink (
+        g_variant_new_string (dori_action_get_id (action)));
+
+    gtk_widget_add_css_class (box, "linked");
+    gtk_widget_add_css_class (box, "dori-split-action");
+    gtk_widget_set_hexpand (box, TRUE);
+
+    gtk_label_set_xalign (GTK_LABEL (label), 0.0);
+    gtk_widget_set_hexpand (label, TRUE);
+    gtk_label_set_ellipsize (GTK_LABEL (label), PANGO_ELLIPSIZE_END);
+    gtk_button_set_child (GTK_BUTTON (primary), label);
+    gtk_widget_set_hexpand (primary, TRUE);
+    gtk_widget_set_focusable (primary, TRUE);
+    gtk_widget_add_css_class (primary, "flat");
+    gtk_widget_add_css_class (primary, "model");
+    gtk_accessible_update_property (GTK_ACCESSIBLE (primary),
+                                    GTK_ACCESSIBLE_PROPERTY_LABEL, display_name,
+                                    GTK_ACCESSIBLE_PROPERTY_HELP_TEXT,
+                                    _("Run immediately with the displayed default value"),
+                                    -1);
+    gtk_actionable_set_action_name (GTK_ACTIONABLE (primary),
+                                    "view.run-custom-action-default");
+    gtk_actionable_set_action_target_value (GTK_ACTIONABLE (primary), target);
+
+    gtk_widget_set_size_request (configure, 42, -1);
+    gtk_widget_set_focusable (configure, TRUE);
+    gtk_widget_add_css_class (configure, "flat");
+    gtk_widget_add_css_class (configure, "model");
+    gtk_widget_set_tooltip_text (configure, configure_label);
+    gtk_accessible_update_property (GTK_ACCESSIBLE (configure),
+                                    GTK_ACCESSIBLE_PROPERTY_LABEL, configure_label,
+                                    GTK_ACCESSIBLE_PROPERTY_HELP_TEXT,
+                                    _("Choose a value for this run or save a new default"),
+                                    -1);
+    gtk_actionable_set_action_name (GTK_ACTIONABLE (configure),
+                                    "view.run-custom-action");
+    gtk_actionable_set_action_target_value (GTK_ACTIONABLE (configure), target);
+
+    g_signal_connect (primary_keys, "key-pressed",
+                      G_CALLBACK (focus_split_action_secondary), configure);
+    gtk_widget_add_controller (primary, primary_keys);
+    g_signal_connect (configure_keys, "key-pressed",
+                      G_CALLBACK (focus_split_action_primary), primary);
+    gtk_widget_add_controller (configure, configure_keys);
+
+    g_signal_connect_object (primary, "clicked",
+                             G_CALLBACK (gtk_popover_popdown), popover,
+                             G_CONNECT_SWAPPED | G_CONNECT_AFTER);
+    g_signal_connect_object (configure, "clicked",
+                             G_CALLBACK (gtk_popover_popdown), popover,
+                             G_CONNECT_SWAPPED | G_CONNECT_AFTER);
+
+    gtk_box_append (GTK_BOX (box), primary);
+    gtk_box_append (GTK_BOX (box), configure);
+
+    return box;
+}
+
+static void
+add_context_menu_split_actions (NautilusFilesView *self,
+                                GtkPopoverMenu    *popover,
+                                GList             *selection)
+{
+    GList *actions = dori_action_manager_get_actions (self->action_manager);
+
+    for (GList *l = actions; l != NULL; l = l->next)
+    {
+        DoriAction *action = l->data;
+        g_autofree char *custom_id = NULL;
+        GtkWidget *row;
+
+        if (!dori_action_has_split_prompt (action) ||
+            !dori_action_is_visible (action, selection))
+        {
+            continue;
+        }
+
+        custom_id = split_action_custom_id (action);
+        row = create_split_action_row (popover, action);
+        if (!gtk_popover_menu_add_child (popover, row, custom_id))
+        {
+            g_warning ("Could not add split context-menu action at custom item ‘%s’",
+                       custom_id);
+            g_object_ref_sink (row);
+            g_object_unref (row);
+        }
+    }
+}
+
 static void
 nautilus_files_view_pop_up_selection_context_menu (NautilusFilesView *self,
                                                    graphene_point_t  *point)
@@ -9206,6 +9725,17 @@ nautilus_files_view_pop_up_selection_context_menu (NautilusFilesView *self,
 
     gtk_popover_menu_set_menu_model (GTK_POPOVER_MENU (self->selection_menu),
                                      G_MENU_MODEL (self->selection_menu_model));
+
+    add_context_menu_quick_actions (GTK_POPOVER_MENU (self->selection_menu),
+                                    self->view_action_group,
+                                    TRUE);
+    {
+        g_autolist (NautilusFile) selection = nautilus_files_view_get_selection (self);
+
+        add_context_menu_split_actions (self,
+                                        GTK_POPOVER_MENU (self->selection_menu),
+                                        selection);
+    }
 
     if (point == NULL)
     {
@@ -9254,6 +9784,13 @@ nautilus_files_view_pop_up_background_context_menu (NautilusFilesView *self,
     gtk_widget_set_halign (self->background_menu, GTK_ALIGN_START);
     gtk_popover_menu_set_menu_model (GTK_POPOVER_MENU (self->background_menu),
                                      G_MENU_MODEL (self->background_menu_model));
+
+    add_context_menu_quick_actions (GTK_POPOVER_MENU (self->background_menu),
+                                    self->view_action_group,
+                                    FALSE);
+    add_context_menu_split_actions (self,
+                                    GTK_POPOVER_MENU (self->background_menu),
+                                    NULL);
 
     GdkRectangle rect = { 0 };
 
@@ -9359,6 +9896,8 @@ nautilus_files_view_notify_selection_changed (NautilusFilesView *view)
 
     view->selection_was_removed = FALSE;
     view->auto_selection = view->in_auto_selection;
+
+    update_selection_order (view);
 
     /* Schedule a display of the new selection. */
     if (view->display_selection_idle_id == 0)

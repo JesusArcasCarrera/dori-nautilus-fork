@@ -2,10 +2,11 @@
 <interface domain="nautilus">
   <requires lib="gtk" version="4.0"/>
   <menu id="background-menu">
-    <item>
-      <attribute name="label" translatable="yes">New _Folder…</attribute>
-      <attribute name="action">view.new-folder</attribute>
-    </item>
+    <section>
+      <item>
+        <attribute name="custom">background-quick-actions</attribute>
+      </item>
+    </section>
     <item>
       <attribute name="label" translatable="yes">New _Document</attribute>
       <attribute name="nautilus-menu-item">templates-submenu</attribute>
@@ -17,25 +18,11 @@
       <attribute name="action">view.open-current-directory-with-other-application</attribute>
       <attribute name="show-in-mode">browse</attribute>
     </item>
-    <item>
-      <attribute name="label" translatable="yes">Open in Consol_e</attribute>
-      <attribute name="action">view.current-directory-console</attribute>
-      <attribute name="hidden-when">action-disabled</attribute>
-    </item>
     <section>
-      <item>
-        <attribute name="label" translatable="yes">_Paste</attribute>
-        <attribute name="action">view.paste</attribute>
-        <attribute name="show-in-mode">browse</attribute>
-      </item>
       <item>
         <attribute name="label" translatable="yes">Paste as _Link</attribute>
         <attribute name="action">view.create-link</attribute>
         <attribute name="hidden-when">action-disabled</attribute>
-      </item>
-      <item>
-        <attribute name="label" translatable="yes">Select _All</attribute>
-        <attribute name="action">view.select-all</attribute>
       </item>
       <item>
         <attribute name="label" translatable="yes">_Visible Columns…</attribute>
@@ -103,6 +90,12 @@
     </section>
   </menu>
   <menu id="selection-menu">
+    <section>
+      <attribute name="show-in-view">normal</attribute>
+      <item>
+        <attribute name="custom">selection-quick-actions</attribute>
+      </item>
+    </section>
     <section id="new-folder-with-selection-section"/>
     <section id="open-with-application-section">
       <item>
@@ -223,14 +216,6 @@
       <attribute name="show-in-mode">browse</attribute>
       <attribute name="show-in-view">normal</attribute>
       <item>
-        <attribute name="label" translatable="yes">Cu_t</attribute>
-        <attribute name="action">view.cut</attribute>
-      </item>
-      <item>
-        <attribute name="label" translatable="yes">_Copy</attribute>
-        <attribute name="action">view.copy</attribute>
-      </item>
-      <item>
         <attribute name="label" translatable="yes">Move to…</attribute>
         <attribute name="action">view.move-to</attribute>
       </item>
@@ -241,10 +226,6 @@
     </section>
     <section id="file-actions-section">
       <attribute name="show-in-view">normal</attribute>
-      <item>
-        <attribute name="label" translatable="yes">Rena_me…</attribute>
-        <attribute name="action">view.rename</attribute>
-      </item>
       <item>
         <attribute name="label" translatable="yes">_Paste Into Folder</attribute>
         <attribute name="action">view.paste-into</attribute>
@@ -268,11 +249,6 @@
       <item>
         <attribute name="label" translatable="yes" comments="Translators: This is the transitive verb meaning 'to send via email' (e.g. 'email this document to Angela).">Email…</attribute>
         <attribute name="action">view.send-email</attribute>
-        <attribute name="hidden-when">action-disabled</attribute>
-      </item>
-      <item>
-        <attribute name="label" translatable="yes">Mo_ve to Trash</attribute>
-        <attribute name="action">view.move-to-trash</attribute>
         <attribute name="hidden-when">action-disabled</attribute>
       </item>
       <item>
