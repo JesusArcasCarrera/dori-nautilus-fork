@@ -16,8 +16,8 @@ endorsed by, or supported by GNOME**. "GNOME", "Nautilus" and "GNOME Files"
 are trademarks of their respective owners; this project reuses the
 GPL-licensed *code*, not the branding.
 
-> **All modifications in this fork were made by an LLM** (Claude, through
-> Claude Code) under my direction, on top of the upstream code.
+> **All modifications in this fork were made by LLM agents** (several
+> models and coding agents) under my direction, on top of the upstream code.
 >
 > <sub>For that very reason I am not submitting them upstream: right now I
 > don't have the time to review every change and send it the way it should be
