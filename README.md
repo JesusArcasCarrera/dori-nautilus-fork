@@ -16,10 +16,18 @@ endorsed by, or supported by GNOME**. "GNOME", "Nautilus" and "GNOME Files"
 are trademarks of their respective owners; this project reuses the
 GPL-licensed *code*, not the branding.
 
-Most of the code in this fork was **written by Claude (Anthropic's AI)** under
-my direction. I provide **no warranty, no support, and no guarantee of
-security or reliability** — use it entirely at your own risk. As with all GPL
-software, it is distributed "as is" (see sections 15–16 of the GPL).
+> **All modifications in this fork were made by an LLM** (Claude, through
+> Claude Code) under my direction, on top of the upstream code.
+>
+> <sub>For that very reason I am not submitting them upstream: right now I
+> don't have the time to review every change and send it the way it should be
+> sent, and I don't want to add noise to the projects or their communities. I
+> am only after tools that fit my own workflow better, and I leave them public
+> here in case any of these changes inspires or helps someone else.</sub>
+
+I provide **no warranty, no support, and no guarantee of security or
+reliability** — use it entirely at your own risk. As with all GPL software, it
+is distributed "as is" (see sections 15–16 of the GPL).
 
 ## What's different from upstream Nautilus
 
