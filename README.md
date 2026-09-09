@@ -33,7 +33,13 @@ is distributed "as is" (see sections 15–16 of the GPL).
 
 Each item below is a single atomic commit on the `feat/desktop-ux-50` branch.
 
+<img src="docs/screenshots/overview-demo-folder.png" alt="Dori browsing a demo folder" width="720">
+
+Screenshots use a synthetic demo folder; see `docs/screenshots/README.md`.
+
 ### Properties open as a non-modal, independent window
+
+<img src="docs/screenshots/properties-non-modal.png" alt="Two properties windows open side by side" width="720">
 
 Right-click → *Properties* no longer opens a modal `AdwDialog` that blocks
 the rest of the file manager. It opens as a regular top-level window: you can
@@ -49,6 +55,10 @@ header bar, and the visibility persists across sessions through a new
 
 ### File operations: pause/resume, expandable to a dedicated window
 
+<img src="docs/screenshots/file-operations-popover.png" alt="Progress popover with Open in Window" width="720">
+
+<img src="docs/screenshots/file-operations-window.png" alt="File Operations window with a paused operation" width="720">
+
 `NautilusProgressInfo` already exposed a `paused` flag but the copy/move
 engine ignored it. A `GCond`-backed wait (`nautilus_progress_info_wait_if_paused`)
 is now checked from `report_copy_progress()`, so pausing takes effect promptly
@@ -63,6 +73,8 @@ viewer-state lifecycle so finished operations aren't removed under the user.
 
 ### Cut affordance overlays the thumbnail instead of replacing it
 
+<img src="docs/screenshots/cut-overlay.png" alt="Cut file keeps its dimmed thumbnail with the scissors overlay" width="720">
+
 When you cut a file, upstream hides the thumbnail entirely and paints a
 scissors glyph in its place. This fork keeps the thumbnail visible (dimmed
 via the icon widget's own opacity, so the filename label stays at full
@@ -70,6 +82,8 @@ opacity and readable) and overlays the dashed border and scissors on top.
 You still see what you cut.
 
 ### Paste text or images as new files
+
+<img src="docs/screenshots/paste-text-as-file.png" alt="Clipboard text pasted as Pasted text.py" width="720">
 
 "Paste" on the folder background (and Ctrl+V) is never greyed out just because
 the clipboard holds no files. Text becomes a new file named after what it looks
@@ -81,6 +95,10 @@ file is created through the regular file-operations job, so it gets a unique
 name on collision, undo support, and is revealed in the view.
 
 ### Custom context-menu actions (`.nemo_action`)
+
+<img src="docs/screenshots/context-menu-custom-actions.png" alt="Context menu with custom actions and Open Link Target" width="720">
+
+<img src="docs/screenshots/custom-actions-editor.png" alt="Custom Actions editor in Preferences" width="720">
 
 A native system for user-defined entries in the context menu. Drop files into
 `~/.local/share/nemo/actions/` and they appear in the right-click menu, live
@@ -168,6 +186,12 @@ Icon-Name=visual-studio-code
 
 ### Direct PDF, image and video operations
 
+<img src="docs/screenshots/context-menu-video-actions.png" alt="Video submenu" width="720">
+
+<img src="docs/screenshots/context-menu-image-actions.png" alt="Image submenu" width="720">
+
+<img src="docs/screenshots/context-menu-pdf-actions.png" alt="Combine PDFs with two PDFs selected" width="720">
+
 Architecture decision (2026-09-07): `.nemo_action` files remain Dori's
 connector to commands. Dori keeps its loader, editor, parameter dialogs,
 selection order and operation tracking, and ships the action definitions and
@@ -235,6 +259,8 @@ simply omitted when `ffprobe` is unavailable.
 
 ### Compress and extract with Estiba when available
 
+<img src="docs/screenshots/compress-dialog-estiba.png" alt="Compress dialog with ZIP, encrypted ZIP, TAR.XZ and 7Z" width="720">
+
 A new `estiba` meson feature (auto-detected through the `estiba-0.1`
 pkg-config module) routes *Compress…* and *Extract Here* through
 `libmarea_archive` — 7z multithreaded, libarchive, unrar, zstd, brotli —
@@ -245,6 +271,8 @@ autoar path is untouched. Estiba lives in the
 [marea](https://github.com/JesusArcasCarrera/marea) repository.
 
 ### Folder tools: flatten, clean, group
+
+<img src="docs/screenshots/context-menu-folder-tools.png" alt="Clean submenu on a folder" width="720">
 
 Right-click a folder → **Clean** submenu:
 
@@ -264,11 +292,17 @@ navigation.
 
 ### Properties: media tracks and on-demand SHA-256
 
+<img src="docs/screenshots/properties-media-tracks.png" alt="Properties of a video with audio and subtitle tracks and SHA-256" width="720">
+
 Properties of a video lists every audio and subtitle track (language, title,
 codec, channels, default/forced) read asynchronously with `ffprobe`. Any file
 gets a *SHA-256* row: click to calculate, click again to copy.
 
 ### Configurable type-to-action behaviour
+
+<img src="docs/screenshots/preferences-type-to-action.png" alt="When you Start Typing preference with its four modes" width="720">
+
+<img src="docs/screenshots/type-to-action-filter.png" alt="Filter mode: typing p keeps only matching items" width="720">
 
 Upstream forces typing in a folder to start a recursive search. This fork
 adds a `type-to-action` GSettings enum with four modes, selectable from
@@ -285,9 +319,9 @@ adds a `type-to-action` GSettings enum with four modes, selectable from
   - **Do Nothing** — typing isn't intercepted. Use the search button or
     `Ctrl+F` / `Ctrl+Shift+F` to start a search explicitly.
 
-In `filter` and `locate` modes the typed text is shown in the top banner
-(`Filter: foo` / `Locate: foo`), and is cleared when you press `Esc` or
-empty it via `Backspace`.
+In every mode the typed text goes to the query bar at the top of the window;
+in `filter` and `locate` modes it is interpreted there instead of starting a
+search, and `Esc` or emptying it with `Backspace` clears it.
 
 `Ctrl+F` (local search) and `Ctrl+Shift+F` (global search) keep working in
 every mode.
@@ -315,6 +349,10 @@ server* address bar is shown; when off, all of that is hidden.
 
 ### Editable XDG/places sidebar section
 
+<img src="docs/screenshots/sidebar-places-editable.png" alt="Dragging a folder onto the Pin folder affordance" width="720">
+
+<img src="docs/screenshots/preferences-sidebar.png" alt="Sidebar preferences page" width="720">
+
 The user-folders block in the sidebar (Documents, Downloads, …) is an editable
 list backed by the `sidebar-places` GSettings key: drag folders onto the
 **Pin folder** affordance to add them, drag rows to **reorder** within the
@@ -324,6 +362,8 @@ behind the shell's `gtk-shell-shows-desktop` hint, which is false on GNOME and
 made the toggle do nothing).
 
 ### Interactive folder usage map
+
+<img src="docs/screenshots/disk-usage-treemap.png" alt="Disk usage treemap of the demo folder" width="720">
 
 Right-click a single local folder — or the background of the current folder —
 and choose **Disk Usage Map…** to open a proportional treemap of its contents.
