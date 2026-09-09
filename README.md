@@ -225,6 +225,41 @@ track title, codec, channel layout and default/forced disposition when present.
 The dialog remains responsive while this information loads, and the section is
 simply omitted when `ffprobe` is unavailable.
 
+### Compress and extract with Estiba when available
+
+A new `estiba` meson feature (auto-detected through the `estiba-0.1`
+pkg-config module) routes *Compress…* and *Extract Here* through
+`libmarea_archive` — 7z multithreaded, libarchive, unrar, zstd, brotli —
+instead of gnome-autoar, which is single-threaded (144 s vs 24 s on a
+325 MB `.7z` with 20 cores). The existing dialog, progress texts, undo,
+passphrase prompt and destination rules are kept; without the library the
+autoar path is untouched. Estiba lives in the
+[marea](https://github.com/JesusArcasCarrera/marea) repository.
+
+### Folder tools: flatten, clean, group
+
+Right-click a folder → **Clean** submenu:
+
+  - **Flatten Folder Contents** moves regular files from all subfolders into
+    the folder. Existing files are never overwritten, folders and symlinks
+    are kept, and folders with version-control metadata are refused.
+  - **Clean Empty Folders** removes nested empty folders, keeping the
+    selected one.
+  - **Group Files** moves the files directly inside the folder into
+    category folders (images, videos, audio, documents, archives, other).
+  - **Group Duplicates** (this level or including subfolders) compares files
+    by SHA-256 and moves extra copies to a `duplicados` folder, keeping one.
+
+Each tool confirms first, runs as a tracked, cancellable operation and
+reports moved/failed counts. Symbolic links also gain **Open Link Target**
+navigation.
+
+### Properties: media tracks and on-demand SHA-256
+
+Properties of a video lists every audio and subtitle track (language, title,
+codec, channels, default/forced) read asynchronously with `ffprobe`. Any file
+gets a *SHA-256* row: click to calculate, click again to copy.
+
 ### Configurable type-to-action behaviour
 
 Upstream forces typing in a folder to start a recursive search. This fork
@@ -365,6 +400,11 @@ Implemented:
   - Other Locations Windows-style drive & network hub
   - Editable + reorderable XDG/places sidebar section
   - Interactive folder usage treemap
+  - Folder tools: flatten, clean empty, group by type, group duplicates
+  - Estiba (libmarea_archive) compression and extraction
+  - Properties: media tracks, on-demand SHA-256
+  - Graphical `.nemo_action` editor in Preferences → Custom Actions
+  - Complete Spanish translation of every fork feature
 
 Planned:
 
@@ -373,8 +413,8 @@ Planned:
     from scratch.
   - **Async I/O hardening** — a sleeping HDD must not freeze navigation in
     tabs/views pointing at other devices.
-  - **`.nemo_action` GUI editor** — create, edit, reorder and group
-    actions without editing files by hand.
+  - **`.nemo_action` editor polish** — reorder and group actions from the
+    editor (creating and editing already works).
   - **Usage-bar polish** in the Other Locations tiles.
 
 ## License
